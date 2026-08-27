@@ -69,3 +69,30 @@ def test_auth_login_force_disables_saved_auth_reuse(tmp_path, monkeypatch, capsy
     assert result == 0
     assert captured["reuse_existing_auth"] is False
     assert "Authorization saved" in capsys.readouterr().out
+
+
+def test_auth_login_can_attach_to_consent_gated_existing_chrome(
+    tmp_path, monkeypatch
+) -> None:
+    captured = {}
+
+    def login(path, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(auth_file=path, profile_dir=tmp_path / "profile")
+
+    monkeypatch.setattr(cli, "browser_login", login)
+
+    result = cli.main(
+        [
+            "auth",
+            "login",
+            "--auth-file",
+            str(tmp_path / "auth.json"),
+            "--profile-dir",
+            str(tmp_path / "profile"),
+            "--attach-existing",
+        ]
+    )
+
+    assert result == 0
+    assert captured["attach_existing"] is True

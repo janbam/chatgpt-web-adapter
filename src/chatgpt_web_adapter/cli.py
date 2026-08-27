@@ -71,6 +71,14 @@ def _build_parser() -> argparse.ArgumentParser:
     login.add_argument("--timeout", type=float, default=300.0)
     login.add_argument("--browser-executable-path", type=Path)
     login.add_argument(
+        "--attach-existing",
+        action="store_true",
+        help=(
+            "attach to a running Chrome 144+ profile whose consent-gated remote "
+            "debugging is enabled"
+        ),
+    )
+    login.add_argument(
         "--force",
         action="store_true",
         help="ignore saved auth and require a fresh interactive browser login",
@@ -228,6 +236,7 @@ def _run_auth(args: argparse.Namespace) -> int:
             timeout=args.timeout,
             browser_executable_path=args.browser_executable_path,
             reuse_existing_auth=not args.force,
+            attach_existing=args.attach_existing,
         )
         print(f"Authorization saved to {result.auth_file}")
         print(f"Persistent browser profile: {result.profile_dir}")

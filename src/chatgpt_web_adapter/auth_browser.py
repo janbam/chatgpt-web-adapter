@@ -4,7 +4,7 @@ import asyncio
 import os
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -35,6 +35,20 @@ class BrowserLoginResult:
     persisted: bool
 
 
+@dataclass(frozen=True)
+class ChromeDebugEndpoint:
+    """Consent-gated DevTools endpoint published by a running Chrome profile."""
+
+    port: int
+    websocket_path: str = field(repr=False)
+
+    @property
+    def websocket_url(self) -> str:
+        """Return the loopback WebSocket URL without persisting it."""
+
+        return f"ws://127.0.0.1:{self.port}{self.websocket_path}"
+
+
 def default_browser_profile_dir() -> Path:
     configured = os.getenv("CHATGPT_WEB_ADAPTER_PROFILE_DIR")
     if configured:
@@ -46,6 +60,155 @@ def default_browser_profile_dir() -> Path:
         return Path.home() / "Library" / "Application Support" / "chatgpt-web-adapter" / "browser-profile"
     state_root = Path(os.getenv("XDG_STATE_HOME") or (Path.home() / ".local" / "state"))
     return state_root / "chatgpt-web-adapter" / "browser-profile"
+
+
+def _read_chrome_debug_endpoint(profile_dir: Path) -> ChromeDebugEndpoint:
+    """Read Chrome's ephemeral consent-gated endpoint from a running profile."""
+
+    active_port_file = profile_dir / "DevToolsActivePort"
+    try:
+        lines = active_port_file.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError as error:
+        raise AuthError(
+            "The selected Chrome profile is not publishing a DevTools endpoint. "
+            "Keep Chrome running and enable Remote debugging at "
+            "chrome://inspect/#remote-debugging."
+        ) from error
+    except OSError as error:
+        raise AuthError(
+            "Failed to read the selected Chrome profile's DevTools endpoint"
+        ) from error
+
+    # Accept only Chrome's browser-level loopback endpoint shape; never follow an
+    # arbitrary host or path from mutable profile state.
+    if len(lines) < 2:
+        raise AuthError("The selected Chrome profile has an incomplete DevTools endpoint")
+    try:
+        port = int(lines[0])
+    except ValueError as error:
+        raise AuthError("The selected Chrome profile has an invalid DevTools port") from error
+    websocket_path = lines[1].strip()
+    if not 1 <= port <= 65535 or not websocket_path.startswith("/devtools/browser/"):
+        raise AuthError("The selected Chrome profile has an invalid DevTools endpoint")
+    return ChromeDebugEndpoint(port=port, websocket_path=websocket_path)
+
+
+async def _open_debug_websocket(url: str, *, timeout: float) -> Any:
+    """Open Chrome's consent-gated socket using the interactive login timeout."""
+
+    from websockets.asyncio.client import connect
+    from zendriver.core.connection import MAX_SIZE, PING_TIMEOUT
+
+    return await connect(
+        url,
+        open_timeout=timeout,
+        ping_timeout=PING_TIMEOUT,
+        max_size=MAX_SIZE,
+    )
+
+
+def _chrome_attach_error() -> AuthError:
+    """Return a secret-free remediation error for Chrome attachment failures."""
+
+    return AuthError(
+        "Could not attach to the selected Chrome profile. Keep Chrome running, "
+        "enable Remote debugging at chrome://inspect/#remote-debugging, and approve "
+        "Chrome's Allow remote debugging dialog."
+    )
+
+
+async def _attach_running_browser(
+    zendriver: Any,
+    profile_dir: Path,
+    timeout: float,
+) -> Any:
+    """Attach zendriver to Chrome's consent-gated default-profile endpoint."""
+
+    endpoint = _read_chrome_debug_endpoint(profile_dir)
+    config = zendriver.Config(
+        user_data_dir=str(profile_dir),
+        host="127.0.0.1",
+        port=endpoint.port,
+    )
+    browser = zendriver.Browser(config)
+    browser.info = zendriver.ContraDict(
+        {"webSocketDebuggerUrl": endpoint.websocket_url},
+        silent=True,
+    )
+    browser.connection = zendriver.Connection(endpoint.websocket_url, _owner=browser)
+
+    # Chrome waits for the user-facing consent dialog; zendriver's default
+    # handshake timeout is too short for an interactive approval.
+    try:
+        browser.connection.websocket = await _open_debug_websocket(
+            endpoint.websocket_url,
+            timeout=timeout,
+        )
+    except Exception:
+        # Do not retain an exception chain that may contain the ephemeral
+        # WebSocket capability in third-party diagnostics.
+        raise _chrome_attach_error() from None
+
+    # Recreate zendriver's normal target-discovery setup without launching or
+    # assuming ownership of the already-running Chrome process.
+    browser.connection.handlers[zendriver.cdp.target.TargetInfoChanged] = [
+        browser._handle_target_update
+    ]
+    browser.connection.handlers[zendriver.cdp.target.TargetCreated] = [
+        browser._handle_target_update
+    ]
+    browser.connection.handlers[zendriver.cdp.target.TargetDestroyed] = [
+        browser._handle_target_update
+    ]
+    browser.connection.handlers[zendriver.cdp.target.TargetCrashed] = [
+        browser._handle_target_update
+    ]
+    try:
+        await browser.connection.send(
+            zendriver.cdp.target.set_discover_targets(discover=True)
+        )
+        await browser.update_targets()
+    except Exception:
+        try:
+            await browser.connection.aclose()
+        except Exception:
+            pass
+        raise _chrome_attach_error() from None
+    return browser
+
+
+async def _disconnect_attached_browser(
+    browser: Any,
+    page: Any,
+    zendriver: Any,
+) -> None:
+    """Close the adapter-owned tab and connection while leaving Chrome running."""
+
+    connection = getattr(browser, "connection", None)
+    if connection is None:
+        return
+
+    # Remove only the temporary auth tab; the surrounding Chrome session remains
+    # owned by the user and must survive adapter shutdown.
+    target_id = getattr(page, "target_id", None)
+    if target_id is not None:
+        try:
+            await connection.send(zendriver.cdp.target.close_target(target_id))
+        except Exception:
+            pass
+    try:
+        if not bool(getattr(connection, "closed", False)):
+            await connection.aclose()
+    except Exception:
+        pass
+
+
+async def _open_login_page(browser: Any, url: str, *, attach_existing: bool) -> Any:
+    """Open an isolated auth tab only when borrowing an existing browser."""
+
+    if attach_existing:
+        return await browser.get(url, new_tab=True)
+    return await browser.get(url)
 
 
 def _import_zendriver() -> Any:
@@ -142,6 +305,7 @@ async def _browser_login_async(
     persist: bool,
     reuse_existing_auth: bool,
     profile_lock_timeout: float,
+    attach_existing: bool,
 ) -> BrowserLoginResult:
     zendriver = _import_zendriver()
     profile_dir.mkdir(parents=True, exist_ok=True)
@@ -151,12 +315,18 @@ async def _browser_login_async(
     except TimeoutError as error:
         raise AuthError(str(error)) from error
     browser: Any = None
+    page: Any = None
     try:
-        browser = await zendriver.start(
-            user_data_dir=str(profile_dir),
-            headless=headless,
-            browser_executable_path=browser_executable_path,
-        )
+        # Attach only when explicitly requested; ordinary login continues to own
+        # and close the browser process it launches.
+        if attach_existing:
+            browser = await _attach_running_browser(zendriver, profile_dir, timeout)
+        else:
+            browser = await zendriver.start(
+                user_data_dir=str(profile_dir),
+                headless=headless,
+                browser_executable_path=browser_executable_path,
+            )
         seed_cookies: dict[str, str] = {}
         seed_browser_cookies: list[dict[str, Any]] = []
         seed_expires: float | None = None
@@ -171,7 +341,9 @@ async def _browser_login_async(
             except (AuthError, OSError, ValueError):
                 seed_cookies = {}
         if not reuse_existing_auth:
-            page = await browser.get("about:blank")
+            page = await _open_login_page(
+                browser, "about:blank", attach_existing=attach_existing
+            )
             existing = await page.send(zendriver.cdp.network.get_all_cookies())
             await _delete_session_cookies(
                 page,
@@ -180,7 +352,9 @@ async def _browser_login_async(
             )
             await page.get(CHAT_URL)
         elif seed_cookies:
-            page = await browser.get("about:blank")
+            page = await _open_login_page(
+                browser, "about:blank", attach_existing=attach_existing
+            )
             await _delete_session_cookies(page, zendriver, seed_auth.cookies)
             cookie_params = browser_cookie_params(
                 zendriver.cdp,
@@ -191,7 +365,9 @@ async def _browser_login_async(
             await page.send(zendriver.cdp.network.set_cookies(cookie_params))
             await page.get(CHAT_URL)
         else:
-            page = await browser.get(CHAT_URL)
+            page = await _open_login_page(
+                browser, CHAT_URL, attach_existing=attach_existing
+            )
         deadline = time.monotonic() + timeout
         seeded_session_deadline = time.monotonic() + 8.0 if seed_cookies else None
         cleared_invalid_seed = False
@@ -314,7 +490,10 @@ async def _browser_login_async(
         )
     finally:
         if browser is not None:
-            await _graceful_browser_stop(browser, zendriver)
+            if attach_existing:
+                await _disconnect_attached_browser(browser, page, zendriver)
+            else:
+                await _graceful_browser_stop(browser, zendriver)
         await asyncio.to_thread(profile_lock.release)
 
 
@@ -328,11 +507,18 @@ def browser_login(
     persist: bool = True,
     reuse_existing_auth: bool = True,
     profile_lock_timeout: float = 30.0,
+    attach_existing: bool = False,
 ) -> BrowserLoginResult:
-    """Open ChatGPT once, wait for sign-in, and persist reusable session auth."""
+    """Open or attach to ChatGPT, then persist reusable session auth.
+
+    ``attach_existing`` uses Chrome's consent-gated ``DevToolsActivePort``
+    endpoint and leaves the existing browser process running.
+    """
 
     if timeout <= 0:
         raise ValueError("timeout must be positive")
+    if attach_existing and headless:
+        raise ValueError("attach_existing cannot be combined with headless browser mode")
     try:
         asyncio.get_running_loop()
     except RuntimeError:
@@ -346,6 +532,7 @@ def browser_login(
                 persist=bool(persist),
                 reuse_existing_auth=bool(reuse_existing_auth),
                 profile_lock_timeout=float(profile_lock_timeout),
+                attach_existing=bool(attach_existing),
             )
         )
     raise AuthError("Synchronous browser_login cannot run inside an active asyncio event loop")

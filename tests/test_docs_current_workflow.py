@@ -15,12 +15,16 @@ def test_authentication_and_troubleshooting_guides_preserve_session_and_diagnost
     troubleshooting = _read("docs/troubleshooting.md")
 
     assert "chatgpt-web-adapter auth login" in authentication
+    assert "--attach-existing" in authentication
+    assert "chrome://inspect/#remote-debugging" in authentication
+    assert "without terminating Chrome" in authentication
     assert "browserCookies" in authentication
     assert "auto_login=True" in authentication
     assert "auto_sentinel=True" in authentication
     assert "sentinel_headless=True" in authentication
     assert "Headless is not browserless" in authentication
     assert "chatgpt-web-adapter auth status" in troubleshooting
+    assert "Existing Chrome Attachment Fails" in troubleshooting
     assert "provider.last_diagnostics" in troubleshooting
     assert "Raw HAR" in troubleshooting
     assert "can still contain secrets" in troubleshooting

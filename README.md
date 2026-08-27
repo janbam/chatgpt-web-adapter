@@ -177,6 +177,8 @@ chatgpt-web-adapter auth status --auth-file auth_data.json
 
 The first login is interactive. Subsequent access-token/session renewal is browserless while the reusable session remains valid.
 
+To authorize through a running Chrome 144+ default profile, enable remote debugging at `chrome://inspect/#remote-debugging`, approve Chrome's connection dialog, and run `chatgpt-web-adapter auth login --attach-existing --profile-dir ~/.config/google-chrome --auth-file auth_data.json`. This mode leaves Chrome running.
+
 `auth_data.json` contains reusable account credentials. Do not share it. See [docs/authentication.md](docs/authentication.md).
 
 ## Browser-Owned Runtime Setup

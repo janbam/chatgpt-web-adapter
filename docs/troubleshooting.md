@@ -17,6 +17,12 @@ Another SDK process is using the same Chromium profile. Let it finish or stop it
 cleanly. Do not delete Chromium lock files while a browser process is active.
 Use separate profile directories for intentionally concurrent sessions.
 
+## Existing Chrome Attachment Fails
+
+`--attach-existing` requires Chrome 144 or later. Keep the selected Chrome profile running, open `chrome://inspect/#remote-debugging`, and confirm **Remote debugging** is enabled. The `--profile-dir` value must name the Chrome user-data root containing `DevToolsActivePort`, such as `~/.config/google-chrome` on Linux, not the nested `Default` directory.
+
+Chrome asks **Allow remote debugging?** for each new connection. Approve that dialog before the `auth login` timeout expires. A missing approval fails without creating or updating the auth file, and the adapter never falls back to launching or closing the existing browser.
+
 ## Sentinel Capture Timeout
 
 The provider retries transient capture failures by default. If all attempts

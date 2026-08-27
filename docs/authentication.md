@@ -31,6 +31,18 @@ Default profile locations:
 
 Set `CHATGPT_WEB_ADAPTER_PROFILE_DIR` or pass `--profile-dir` to override it.
 
+## Attach to an Existing Chrome Profile
+
+Chrome 144 and later can expose a running default profile through its consent-gated remote-debugging mode. In Chrome, open `chrome://inspect/#remote-debugging`, enable **Remote debugging**, and keep Chrome running. Then point `--profile-dir` at Chrome's user-data root, not its nested `Default` profile:
+
+```bash
+chatgpt-web-adapter auth login --attach-existing --profile-dir ~/.config/google-chrome --auth-file auth_data.json
+```
+
+Approve Chrome's **Allow remote debugging** dialog for each new adapter connection. The adapter opens a temporary ChatGPT tab, captures authorization through the same `/api/auth/session` flow as ordinary login, closes only that tab, and disconnects without terminating Chrome.
+
+`--attach-existing` fails closed when `DevToolsActivePort` is absent, malformed, or not a browser-level loopback endpoint. It cannot be combined with headless mode. The ephemeral DevTools WebSocket capability is used only in memory and is never written to `auth_data.json`.
+
 ## What Is Stored
 
 The login command creates two related pieces of reusable state:
