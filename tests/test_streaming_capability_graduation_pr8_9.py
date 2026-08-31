@@ -37,6 +37,18 @@ class _Client:
 
 
 class _Provider:
+    def read_conversation(self, *args, **kwargs):
+        raise AssertionError("streaming governance tests must not perform canonical reads")
+
+    def set_browser_authority_lease(self, lease_id):
+        self.lease_id = lease_id
+
+    def complete_canonical_readback(self):
+        return True
+
+    def clear_browser_authority_lease(self):
+        self.lease_id = None
+
     def status(self):
         return BrowserNativeBridgeStatus(
             available=True,
@@ -80,7 +92,7 @@ def test_streaming_governance_freezes_revision_safe_public_contract() -> None:
     ]
     assert governance["streaming_source"] == "CDP_NETWORK_STREAM_RESOURCE_CONTENT"
     assert governance["streaming_delivery"] == "REVISION_SAFE_EVENT_STREAM"
-    assert governance["streaming_canonical_finality"] == "BROWSERLESS_CANONICAL_HTTP"
+    assert governance["streaming_canonical_finality"] == "BROWSER_CONTEXT_CANONICAL_HTTP"
     assert governance["streaming_canonical_finality_authoritative"] is True
     assert governance["streaming_reconciliation_states"] == [
         EXACT_MATCH,

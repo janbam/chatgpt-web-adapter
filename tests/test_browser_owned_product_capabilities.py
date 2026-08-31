@@ -41,6 +41,18 @@ class _Client:
 
 
 class _Provider:
+    def read_conversation(self, *args, **kwargs):
+        raise AssertionError("capability tests must not perform canonical reads")
+
+    def set_browser_authority_lease(self, lease_id):
+        self.lease_id = lease_id
+
+    def complete_canonical_readback(self):
+        return True
+
+    def clear_browser_authority_lease(self):
+        self.lease_id = None
+
     def status(self):
         return BrowserNativeBridgeStatus(
             available=True,

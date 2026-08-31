@@ -5,10 +5,12 @@ from types import SimpleNamespace
 import pytest
 
 import chatgpt_web_adapter.browser_owned_write_runtime as subject
+from chatgpt_web_adapter.browser_native_provider import BrowserNativeCanonicalReadError
 
 
 class FakeProvider:
     def __init__(self, *, available=True, connected=True, tab_id=None):
+        self.bound = None
         self._status = subject.BrowserNativeBridgeStatus(
             available=available,
             extension_connected=connected,
@@ -17,6 +19,15 @@ class FakeProvider:
 
     def status(self):
         return self._status
+
+    def set_browser_authority_lease(self, lease_id):
+        self.bound = lease_id
+
+    def complete_canonical_readback(self):
+        return True
+
+    def clear_browser_authority_lease(self):
+        self.bound = None
 
     def send_text(self, *args, **kwargs):
         raise AssertionError("low-level provider should be called through send_browser_native")
@@ -160,12 +171,53 @@ def test_delegated_provider_error_is_never_auto_retried(monkeypatch) -> None:
     assert error.reconciliation_required is True
 
 
+def test_terminal_read_failure_after_write_preserves_identity_without_retry(monkeypatch) -> None:
+    calls = 0
+
+    def fail(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        kwargs["on_event"](
+            {
+                "type": "browser_native_write_completed",
+                "conversation_id": "conversation-created",
+                "runtime_tab_id": 77,
+            }
+        )
+        raise BrowserNativeCanonicalReadError(
+            "CANONICAL_READ_ACCESS_CHALLENGED",
+            conversation_id="conversation-created",
+            status_code=403,
+            content_type="text/html",
+            retryable=False,
+        )
+
+    monkeypatch.setattr(subject, "send_browser_native", fail)
+    rt = runtime(tab_id=77)
+    with pytest.raises(subject.BrowserOwnedWriteRuntimeError) as caught:
+        rt.send_text("hello")
+
+    error = caught.value
+    assert calls == 1
+    assert error.failure_kind == subject.WRITE_ACCEPTED_READBACK_INCOMPLETE
+    assert error.conversation_id == "conversation-created"
+    assert error.reason_code == "CANONICAL_READ_ACCESS_CHALLENGED"
+    assert error.status_code == 403
+    assert error.content_type == "text/html"
+    assert error.write_may_have_been_submitted is True
+    assert error.reconciliation_required is True
+    assert error.automatic_retry_allowed is False
+    assert error.turn_lifecycle.state is subject.TurnLifecycleState.READBACK_INCOMPLETE
+    assert error.browser_authority_lease.authority_release_proven is True
+
+
 def test_governance_keeps_browser_confined_to_write() -> None:
     policy = runtime().governance()
-    assert policy["read_plane"] == subject.READ_PLANE
+    assert policy["read_plane"] == "BROWSER_CONTEXT_CANONICAL_HTTP"
     assert policy["session_plane"] == subject.SESSION_PLANE
     assert policy["write_plane"] == subject.WRITE_PLANE
     assert policy["browser_launch_owned_by_runtime"] is False
     assert policy["runtime_tab_required_before_turn"] is False
     assert policy["automatic_write_retry"] is False
     assert policy["direct_private_product_write"] is False
+    assert policy["browser_authority_release_event"] == "browser_native_readback_completed"

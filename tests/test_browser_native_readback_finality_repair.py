@@ -8,6 +8,7 @@ from chatgpt_web_adapter.browser_native_client import (
     _status_finalizes_message,
     _wait_for_new_final_assistant,
 )
+from chatgpt_web_adapter.browser_native_provider import BrowserNativeCanonicalReadError
 from chatgpt_web_adapter.exceptions import ConversationTimeoutError
 from chatgpt_web_adapter.messages import _message_finish_reason
 
@@ -120,3 +121,92 @@ def test_finish_reason_remains_fast_path_without_status_message_id() -> None:
         timeout=0.01,
         interval=0.001,
     ) is message
+
+
+def _final_payload() -> dict:
+    return {
+        "conversation_id": "conversation-1",
+        "current_node": "node-new",
+        "mapping": {
+            "node-new": {
+                "parent": None,
+                "children": [],
+                "message": {
+                    "id": "assistant-new",
+                    "author": {"role": "assistant"},
+                    "content": {"content_type": "text", "parts": ["done"]},
+                    "recipient": "all",
+                    "metadata": {"finish_details": {"type": "stop"}},
+                },
+            }
+        },
+    }
+
+
+def test_retryable_visibility_lag_is_polled_until_canonical_payload_exists() -> None:
+    class Client:
+        def __init__(self) -> None:
+            self.read_count = 0
+
+        def _get_conversation_payload(self, conversation_id):
+            self.read_count += 1
+            if self.read_count == 1:
+                raise BrowserNativeCanonicalReadError(
+                    "CANONICAL_READ_NOT_VISIBLE",
+                    conversation_id=conversation_id,
+                    status_code=404,
+                    content_type="application/json",
+                    retryable=True,
+                )
+            return _final_payload()
+
+    client = Client()
+    message = _wait_for_new_final_assistant(
+        client,
+        "conversation-1",
+        baseline_assistant_ids=set(),
+        timeout=1,
+        interval=0.001,
+    )
+
+    assert message.message_id == "assistant-new"
+    assert client.read_count == 2
+
+
+@pytest.mark.parametrize(
+    ("reason_code", "status_code", "retryable"),
+    [
+        ("CANONICAL_READ_ACCESS_CHALLENGED", 403, False),
+        ("CANONICAL_READ_HTTP_ERROR", 500, True),
+    ],
+)
+def test_non_visibility_canonical_failures_stop_after_first_read(
+    reason_code,
+    status_code,
+    retryable,
+) -> None:
+    class Client:
+        def __init__(self) -> None:
+            self.read_count = 0
+
+        def _get_conversation_payload(self, conversation_id):
+            self.read_count += 1
+            raise BrowserNativeCanonicalReadError(
+                reason_code,
+                conversation_id=conversation_id,
+                status_code=status_code,
+                content_type="text/html",
+                retryable=retryable,
+            )
+
+    client = Client()
+    with pytest.raises(BrowserNativeCanonicalReadError):
+        _wait_for_new_final_assistant(
+            client,
+            "conversation-1",
+            baseline_assistant_ids=set(),
+            timeout=10,
+            interval=1,
+        )
+
+    assert client.read_count == 1

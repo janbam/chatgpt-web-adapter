@@ -25,7 +25,7 @@ class _Health:
             "conversation_id": self.conversation_id,
             "canonical_status": self.canonical_status,
             "canonical_read_checked": True,
-            "read_plane": "BROWSERLESS_CANONICAL_HTTP",
+            "read_plane": "BROWSER_CONTEXT_CANONICAL_HTTP",
             "session_plane": "CANONICAL_SESSION",
             "write_plane": "BROWSER_NATIVE_PAGE_OWNED_WRITE",
             "automatic_write_retry": False,

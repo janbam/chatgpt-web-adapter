@@ -20,7 +20,7 @@ CONVERSATION = "6a82dabf-65b8-83eb-b8d5-5a86c6ba635d"
 def test_popup_subtree_worker_is_additive_after_failure_layer_and_read_only():
     root = browser_native_extension_dir()
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "0.1.13"
+    assert manifest["version"] == "0.1.14"
     observability = (root / "service_worker_observability.js").read_text(encoding="utf-8")
     prior = 'importScripts("service_worker_instant_failure_forensics_pr8_8.js")'
     new = 'importScripts("service_worker_instant_popup_subtree_forensics_pr8_8.js")'

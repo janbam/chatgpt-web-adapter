@@ -42,7 +42,7 @@ The provisional stream is not final authority. `canonical_text_finalized` carrie
 
 ## Ownership and safety
 
-The browser-owned transport owns early text observation through the page-owned response stream. Canonical HTTP remains the finality and reconciliation authority.
+The browser-owned transport owns early text observation through the page-owned response stream. Canonical HTTP fetched inside the authenticated ChatGPT runtime tab remains the finality and reconciliation authority.
 
 The production contract preserves:
 
@@ -63,7 +63,7 @@ The production contract preserves:
 - `streaming_event_surface = "on_event"`
 - `streaming_source = "CDP_NETWORK_STREAM_RESOURCE_CONTENT"`
 - `streaming_delivery = "REVISION_SAFE_EVENT_STREAM"`
-- `streaming_canonical_finality = "BROWSERLESS_CANONICAL_HTTP"`
+- `streaming_canonical_finality = "BROWSER_CONTEXT_CANONICAL_HTTP"`
 - `streaming_canonical_finality_authoritative = true`
 - `streaming_legacy_on_token_semantics = "FINAL_ONLY"`
 - `streaming_raw_sse_exported = false`

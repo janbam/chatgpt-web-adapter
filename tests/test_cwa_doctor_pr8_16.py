@@ -275,6 +275,10 @@ def test_runtime_checks_use_health_and_capabilities_only(monkeypatch) -> None:
             assert conversation == "conversation-1"
             return SimpleNamespace(
                 ready=True,
+                conversation_id="conversation-1",
+                canonical_read_checked=True,
+                canonical_status="completed",
+                read_plane="BROWSER_CONTEXT_CANONICAL_HTTP",
                 automatic_write_retry=False,
                 fallback_transport=None,
                 to_dict=lambda: {
@@ -305,10 +309,56 @@ def test_runtime_checks_use_health_and_capabilities_only(monkeypatch) -> None:
 
     assert [check.id for check in checks] == [
         "runtime.health",
+        "runtime.canonical_read_route",
         "runtime.fail_closed_policy",
         "runtime.required_capabilities",
     ]
     assert all(check.status is DoctorCheckStatus.PASS for check in checks)
+
+
+def test_runtime_checks_report_safe_canonical_route_failure(monkeypatch) -> None:
+    required = {
+        name: {"state": "AVAILABLE"}
+        for name in doctor._REQUIRED_CAPABILITIES
+    }
+    runtime = SimpleNamespace(
+        health=lambda conversation: SimpleNamespace(
+            ready=False,
+            conversation_id=conversation,
+            canonical_read_checked=True,
+            canonical_status=None,
+            canonical_read_reason_code="CANONICAL_READ_ACCESS_CHALLENGED",
+            canonical_read_status_code=403,
+            canonical_read_content_type="text/html",
+            read_plane="BROWSER_CONTEXT_CANONICAL_HTTP",
+            automatic_write_retry=False,
+            fallback_transport=None,
+            to_dict=lambda: {"ready": False},
+        ),
+        capabilities=lambda: SimpleNamespace(
+            to_dict=lambda: {"capabilities": required}
+        ),
+    )
+    monkeypatch.setattr(doctor, "assemble_product_runtime", lambda **kwargs: runtime)
+
+    checks = doctor._runtime_checks(
+        transport="browser-owned",
+        auth_file="auth.json",
+        conversation="conversation-1",
+    )
+
+    canonical = {check.id: check for check in checks}["runtime.canonical_read_route"]
+    assert canonical.status is DoctorCheckStatus.FAIL
+    assert canonical.evidence == {
+        "conversation_id": "conversation-1",
+        "canonical_read_checked": True,
+        "read_plane": "BROWSER_CONTEXT_CANONICAL_HTTP",
+        "canonical_status": None,
+        "reason_code": "CANONICAL_READ_ACCESS_CHALLENGED",
+        "status_code": 403,
+        "content_type": "text/html",
+    }
+    assert "<html" not in json.dumps(canonical.to_dict()).lower()
 
 
 def test_runtime_checks_fail_on_retry_or_fallback(monkeypatch) -> None:

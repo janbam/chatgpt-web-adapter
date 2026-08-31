@@ -30,6 +30,36 @@ def _optional_status_code(value: Any) -> int | None:
     return status_code if status_code > 0 else None
 
 
+_SENSITIVE_RESPONSE_MARKERS = (
+    "<!doctype html",
+    "<html",
+    "<script",
+    "cf_chl_",
+    "challenge-platform",
+    "cf_clearance=",
+    "_puid=",
+    "cookie:",
+    "authorization:",
+    "bearer ",
+)
+
+
+def _contains_sensitive_response_material(value: str) -> bool:
+    """Return whether request diagnostics contain browser-protection or credentials."""
+
+    normalized = value.lower().replace('\\"', '"').replace("\\'", "'")
+    if any(marker in normalized for marker in _SENSITIVE_RESPONSE_MARKERS):
+        return True
+    return re.search(
+        r'''["']?(?:access_token|accesstoken|session_token|sessiontoken|'''
+        r'''refresh_token|refreshtoken|conduit_token|conduittoken|token|'''
+        r'''password|api_key|apikey|authorization|cookie|set-cookie|'''
+        r'''cf_clearance|_puid)["']?'''
+        r'''\s*[:=]\s*["']?[^\s,;}]+''',
+        normalized,
+    ) is not None
+
+
 def _body_preview(value: Any, *, limit: int = 300) -> str | None:
     if value is None:
         return None
@@ -38,9 +68,22 @@ def _body_preview(value: Any, *, limit: int = 300) -> str | None:
     else:
         text = str(value)
     text = text.strip()
-    if not text:
+    if not text or _contains_sensitive_response_material(text):
         return None
     return text[:limit]
+
+
+def _safe_request_message(message: str) -> str:
+    """Preserve stable request metadata while dropping sensitive response material."""
+
+    if not _contains_sensitive_response_material(message):
+        return message
+    prefix = re.match(r"^(.*?\bstatus=\d+\s*:\s*)", message, re.DOTALL)
+    if prefix is not None and not _contains_sensitive_response_material(prefix.group(1)):
+        return f"{prefix.group(1)}<redacted sensitive response>"
+    status_code = _status_code_from_message(message)
+    status_suffix = f" status={status_code}" if status_code is not None else ""
+    return f"request failed:{status_suffix} <redacted sensitive response>"
 
 
 def _status_code_from_message(message: str) -> int | None:
@@ -119,7 +162,7 @@ class RequestError(WebChatAdapterError):
         self.body_preview = _body_preview(body_preview) or _body_preview_from_message(
             message
         )
-        super().__init__(message)
+        super().__init__(_safe_request_message(message))
 
     def to_dict(self) -> dict[str, Any]:
         return {

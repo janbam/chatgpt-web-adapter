@@ -18,7 +18,19 @@ class _Canonical:
 
 
 class _NoWriteProvider:
-    """Construction-only provider; contract inspection must never perform a write."""
+    """Construction-only provider; contract inspection performs no product I/O."""
+
+    def read_conversation(self, *args, **kwargs):
+        raise AssertionError("PR9.0 contract inspection must not perform a canonical read")
+
+    def set_browser_authority_lease(self, lease_id):
+        self.lease_id = lease_id
+
+    def complete_canonical_readback(self):
+        return True
+
+    def clear_browser_authority_lease(self):
+        self.lease_id = None
 
     def send_text(self, *args, **kwargs):
         raise AssertionError("PR9.0 contract inspection must not perform a product write")

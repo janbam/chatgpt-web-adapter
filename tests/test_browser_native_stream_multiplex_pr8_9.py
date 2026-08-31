@@ -137,3 +137,63 @@ def test_provider_callback_failure_does_not_cancel_final_frame(monkeypatch, tmp_
         on_event=explode,
     )
     assert response["ok"] is True
+
+
+def test_broker_forwards_canonical_chunks_without_reassembling_them(monkeypatch, tmp_path) -> None:
+    broker = BrowserNativeBroker(state_dir=tmp_path)
+    broker.extension_connected = True
+    forwarded: list[dict] = []
+    emitted: list[dict] = []
+    result_box: list[dict] = []
+    monkeypatch.setattr(
+        host_module,
+        "write_native_message",
+        lambda _stream, payload: forwarded.append(dict(payload)),
+    )
+    request = {
+        "protocol": 1,
+        "token": broker.token,
+        "type": "canonical_read",
+        "request_id": "read-1",
+        "conversationId": "conversation-1",
+        "timeoutMs": 5000,
+    }
+
+    thread = threading.Thread(
+        target=lambda: result_box.append(
+            broker.handle_local_request(request, event_sink=emitted.append)
+        )
+    )
+    thread.start()
+    for _ in range(1000):
+        if forwarded:
+            break
+        threading.Event().wait(0.001)
+
+    broker.route_native_message(
+        {
+            "protocol": 1,
+            "type": "canonical_read_chunk",
+            "request_id": "read-1",
+            "chunkIndex": 0,
+            "chunkCount": 1,
+            "totalBytes": 2,
+            "sha256": "0" * 64,
+            "data": "e30=",
+        }
+    )
+    broker.route_native_message(
+        {
+            "protocol": 1,
+            "type": "canonical_read_result",
+            "request_id": "read-1",
+            "ok": True,
+        }
+    )
+    thread.join(timeout=2)
+    try:
+        assert forwarded[0]["type"] == "canonical_read"
+        assert emitted[0]["type"] == "canonical_read_chunk"
+        assert result_box[0]["type"] == "canonical_read_result"
+    finally:
+        broker._server.server_close()

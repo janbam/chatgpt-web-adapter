@@ -71,6 +71,7 @@ Primary files:
 - `src/chatgpt_web_adapter/auth_status.py`
 - `src/chatgpt_web_adapter/auth_store.py`
 - `src/chatgpt_web_adapter/browser_cookies.py`
+- `src/chatgpt_web_adapter/browser_context_canonical.py`
 
 Responsibilities:
 
@@ -81,9 +82,9 @@ Responsibilities:
 - recover canonical conversation/message identity;
 - provide the independent readback used to prove completion after browser-owned writes.
 
-PR8.4 names the structural contract `CanonicalConversationClient`. The current implementation is supplied by `ChatGPTWebClient`, but product-runtime callers should depend on the canonical interface rather than on legacy write methods.
+PR8.4 names the structural contract `CanonicalConversationClient`. Product-runtime callers depend on that interface rather than legacy write methods. `browserless-request` uses the curl-backed `ChatGPTWebClient`; `browser-owned` fetches exact canonical JSON inside its authenticated ChatGPT runtime tab and reuses the same Python status/message/attach interpreters.
 
-Browserless canonical reads/session renewal are a strong property and should remain outside the browser unless a future architecture comparison proves a better alternative.
+Browser-owned canonical reads stay on the serialized Browser Authority lane through terminal readback. They export only bounded chunk frames and safe failure metadata—never browser cookies, protection headers, or challenge bodies. Browserless session renewal remains independent.
 
 ## Layer 3: Browser-Owned Product Write Transport
 
@@ -102,7 +103,7 @@ Responsibilities:
 - recheck canonical continuation state at the commit point;
 - delegate exactly once to the official ChatGPT page-owned write path;
 - avoid automatic retry after an ambiguous delegated write;
-- require canonical assistant readback before returning success;
+- require browser-context canonical assistant readback before returning success;
 - observe runtime-tab creation/reuse and foreground behavior without making those browser facts part of the generic transport contract.
 
 The browser page owns protected product-write semantics. The bridge does not reconstruct private protected POSTs, export protection credentials, solve challenges, or emulate browser protection state.

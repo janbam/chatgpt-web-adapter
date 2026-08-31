@@ -6,7 +6,7 @@ from chatgpt_web_adapter.browser_native_install import browser_native_extension_
 def test_reasoning_effort_workers_are_additive_and_do_not_select_or_submit():
     root = browser_native_extension_dir()
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "0.1.13"
+    assert manifest["version"] == "0.1.14"
     observability = (root / "service_worker_observability.js").read_text(encoding="utf-8")
     topology_import = 'importScripts("service_worker_reasoning_effort_slider_topology_pr8_8.js")'
     governance_import = 'importScripts("service_worker_reasoning_effort_slider_governance_pr8_8.js")'

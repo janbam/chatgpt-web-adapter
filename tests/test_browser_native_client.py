@@ -10,6 +10,10 @@ from chatgpt_web_adapter.types import ChatConversation
 class FakeProvider:
     def __init__(self) -> None:
         self.normal_calls = []
+        self.bound_lease_id = None
+
+    def set_browser_authority_lease(self, lease_id):
+        self.bound_lease_id = lease_id
 
     def send_text(self, text, *, conversation=None, timeout=None):
         self.normal_calls.append((text, conversation, timeout))
@@ -124,6 +128,38 @@ def test_client_returns_canonical_readback_not_native_body() -> None:
     assert provider.normal_calls == [("hello", "existing-conversation", 2)]
 
 
+def test_continuation_binds_authority_only_after_canonical_prechecks() -> None:
+    provider = FakeProvider()
+    client = _client(provider)
+    original_get_status = client.get_status
+    original_get_messages = client.get_messages
+    precheck_bindings = []
+
+    def get_status(conversation):
+        precheck_bindings.append(provider.bound_lease_id)
+        return original_get_status(conversation)
+
+    def get_messages(conversation, **kwargs):
+        precheck_bindings.append(provider.bound_lease_id)
+        return original_get_messages(conversation, **kwargs)
+
+    client.get_status = get_status
+    client.get_messages = get_messages
+
+    send_browser_native(
+        client,
+        "hello",
+        conversation="existing-conversation",
+        timeout=2,
+        poll_interval=0.01,
+        browser_authority_lease_id="lease-new",
+    )
+
+    assert precheck_bindings[:2] == [None, None]
+    assert provider.bound_lease_id == "lease-new"
+    assert provider.normal_calls == [("hello", "existing-conversation", 2)]
+
+
 def test_completed_continuation_authorizes_bounded_stale_ui_recovery() -> None:
     provider = RecoveryFakeProvider()
     client = _client(provider, status_value="completed")
@@ -196,3 +232,21 @@ def test_new_chat_never_authorizes_stale_ui_recovery() -> None:
 
     assert provider.normal_calls == [("hello", None, 2)]
     assert provider.recovery_calls == []
+
+
+def test_final_token_callback_failure_does_not_invalidate_canonical_success() -> None:
+    provider = FakeProvider()
+    client = _client(provider)
+
+    def fail_observer(_text: str) -> None:
+        raise RuntimeError("observer failed")
+
+    response = send_browser_native(
+        client,
+        "hello",
+        timeout=2,
+        poll_interval=0.01,
+        on_token=fail_observer,
+    )
+
+    assert response.text == "CANONICAL_READBACK"

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from chatgpt_web_adapter import RequestError
 
 
@@ -52,3 +54,45 @@ def test_request_error_defaults_structured_fields_to_none() -> None:
     assert error.endpoint is None
     assert error.body_preview is None
     assert error.request_stage is None
+
+
+def test_request_error_redacts_challenge_html_from_message_and_preview() -> None:
+    secret = "cf_chl_secret-value"
+    error = RequestError(
+        f"conversation status=403: <!doctype html><script>{secret}</script>",
+        body_preview=f"<html>{secret}</html>",
+    )
+
+    assert str(error) == "conversation status=403: <redacted sensitive response>"
+    assert error.status_code == 403
+    assert error.endpoint == "conversation"
+    assert error.body_preview is None
+    assert secret not in str(error.to_dict())
+
+
+def test_request_error_redacts_explicit_cookie_material() -> None:
+    error = RequestError(
+        "transport failed",
+        body_preview="Set-Cookie: cf_clearance=secret; HttpOnly",
+    )
+
+    assert error.body_preview is None
+
+
+@pytest.mark.parametrize(
+    "material",
+    [
+        '{"access_token":"secret-json-token"}',
+        '{"accessToken":"secret-camel-access-token"}',
+        "{'sessionToken': 'secret-session-token'}",
+        r'{\"accessToken\":\"secret-escaped-token\"}',
+        "{'token': 'secret-python-token'}",
+        '{"cookie":"cf_clearance=secret-cookie"}',
+    ],
+)
+def test_request_error_redacts_quoted_credential_fields(material: str) -> None:
+    error = RequestError(f"backend status=403: {material}")
+
+    assert str(error) == "backend status=403: <redacted sensitive response>"
+    assert error.body_preview is None
+    assert "secret" not in str(error.to_dict())
