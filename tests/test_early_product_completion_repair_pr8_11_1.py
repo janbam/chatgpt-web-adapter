@@ -55,6 +55,33 @@ def test_accepted_early_boundary_skips_post_network_waits() -> None:
     assert "waitForComposerReady(" not in candidate
 
 
+def test_provisional_web_route_cannot_complete_the_early_boundary() -> None:
+    source = _read(RECOVERY)
+    helper_start = source.index("function _pr811CanonicalConversationId")
+    helper_end = source.index("\n}\n", helper_start)
+    helper = source[helper_start:helper_end]
+    candidate_start = source.index('if (firstBoundary?.kind === "assistant_terminal_candidate")')
+    fallback_start = source.index("if (diagnostics.earlyCompletionAccepted !== true)", candidate_start)
+    candidate = source[candidate_start:fallback_start]
+
+    assert "/^WEB:/i.test(conversationId)" in helper
+    assert "_pr811CanonicalConversationId(rawUrlConversationId)" in candidate
+    assert source.count("_pr811CanonicalConversationId(rawUrlConversationId)") == 2
+    assert 'diagnostics.earlyCompletionRejectedReason = "conversation_route_provisional"' in candidate
+
+
+def test_returned_identity_excludes_provisional_stream_and_route_ids() -> None:
+    source = _read(RECOVERY)
+    return_start = source.index("// Prefer stream metadata")
+    return_block = source[return_start:]
+
+    assert "_pr811SelectCanonicalConversationId(" in return_block
+    assert "safeMetadata.conversationId," in return_block
+    assert "rawUrlConversationId" in return_block
+    assert "conversationId," in return_block
+    assert "safeMetadata.conversationId || urlConversationId" not in return_block
+
+
 def test_early_repair_requires_conjunctive_current_answer_terminal_proof() -> None:
     source = _read(REPAIR)
     assert "firstVisibleAssistantTextAt" in source

@@ -30,6 +30,18 @@ function _pr811FreshCanonicalCompletionEvidence(message) {
   return ageMs >= 0 && ageMs <= STALE_UI_COMPLETION_EVIDENCE_MAX_AGE_MS;
 }
 
+/** Keep provisional page routes out of canonical backend reads. */
+function _pr811CanonicalConversationId(value) {
+  const conversationId = typeof value === "string" ? value.trim() : "";
+  return conversationId && !/^WEB:/i.test(conversationId) ? conversationId : null;
+}
+
+/** Prefer canonical stream identity, then canonical route identity. */
+function _pr811SelectCanonicalConversationId(streamValue, routeValue) {
+  return _pr811CanonicalConversationId(streamValue)
+    || _pr811CanonicalConversationId(routeValue);
+}
+
 async function _pr811ReloadRuntimeTabAndWait(tabId, expectedConversationId) {
   const startedAt = performance.now();
   await new Promise((resolve, reject) => {
@@ -101,9 +113,9 @@ async function _pr811MaybeRecoverStaleRuntimeUi(message) {
 // PR8.11.1 production repair. This is the current core page-turn implementation
 // with one additional fail-closed completion race. A visible assistant terminal
 // signal may stop blocking on Network.loadingFinished only when the response is
-// already HTTP 200 and the page already exposes a concrete /c/<id> route.
-// Otherwise it falls through to the prior network-complete path. Canonical HTTP
-// readback remains mandatory in browser_native_client.py after this returns.
+// already HTTP 200 and the page exposes a durable /c/<id> route. Provisional
+// WEB:<id> routes fall through to the prior network-complete path. Canonical
+// HTTP readback remains mandatory in browser_native_client.py after this returns.
 executeOfficialPageTurn = async function _executeOfficialPageTurnWithEarlyTerminalBoundary({
   tabId,
   text,
@@ -236,6 +248,7 @@ executeOfficialPageTurn = async function _executeOfficialPageTurnWithEarlyTermin
     let requestId = conversationRequestId;
     let safeMetadata = { conversationId: null, turnExchangeId: null };
     let finalTab = null;
+    let rawUrlConversationId = null;
     let urlConversationId = null;
 
     if (firstBoundary?.kind === "assistant_terminal_candidate") {
@@ -246,12 +259,15 @@ executeOfficialPageTurn = async function _executeOfficialPageTurnWithEarlyTermin
           : null
       );
       finalTab = await chrome.tabs.get(tabId);
-      urlConversationId = conversationIdFromUrl(finalTab.url || "");
+      rawUrlConversationId = conversationIdFromUrl(finalTab.url || "");
+      urlConversationId = _pr811CanonicalConversationId(rawUrlConversationId);
 
       if (diagnostics.conversationResponseSeen !== true || diagnostics.responseStatus !== 200) {
         diagnostics.earlyCompletionRejectedReason = "response_not_proven_200";
-      } else if (!urlConversationId) {
+      } else if (!rawUrlConversationId) {
         diagnostics.earlyCompletionRejectedReason = "conversation_route_not_resolved";
+      } else if (!urlConversationId) {
+        diagnostics.earlyCompletionRejectedReason = "conversation_route_provisional";
       } else {
         diagnostics.earlyCompletionAccepted = true;
         diagnostics.completionBoundary = "assistant_terminal";
@@ -278,14 +294,20 @@ executeOfficialPageTurn = async function _executeOfficialPageTurnWithEarlyTermin
         Math.min(remainingMs(startedAt, timeoutMs), DEFAULT_READY_TIMEOUT_MS)
       );
       finalTab = await chrome.tabs.get(tabId);
-      urlConversationId = conversationIdFromUrl(finalTab.url || "");
+      rawUrlConversationId = conversationIdFromUrl(finalTab.url || "");
+      urlConversationId = _pr811CanonicalConversationId(rawUrlConversationId);
     }
 
+    // Prefer stream metadata, but return only identities safe for canonical readback.
+    const conversationId = _pr811SelectCanonicalConversationId(
+      safeMetadata.conversationId,
+      rawUrlConversationId
+    );
     diagnostics.elapsedMs = elapsedMs(startedAt);
     return {
       diagnostics,
       finalUrl: finalTab?.url || "",
-      conversationId: safeMetadata.conversationId || urlConversationId,
+      conversationId,
       turnExchangeId: safeMetadata.turnExchangeId
     };
   } finally {

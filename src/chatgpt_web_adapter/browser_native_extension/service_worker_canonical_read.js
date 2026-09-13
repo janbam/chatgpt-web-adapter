@@ -44,12 +44,13 @@ async function _cwaCanonicalRuntimeTab() {
 async function _cwaCanonicalFetch(tabId, conversationId, timeoutMs) {
   const debuggee = { tabId };
   const endpoint = `${CHATGPT_ORIGIN}/backend-api/conversation/${encodeURIComponent(conversationId)}`;
+  const sessionEndpoint = `${CHATGPT_ORIGIN}/api/auth/session`;
   const expression = `(async () => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), ${JSON.stringify(timeoutMs)});
     const routeCandidates = () => {
-      // Temporary live diagnostic: expose only bounded same-origin paths and
-      // status metadata; query strings, headers, bodies, and credentials stay in Chrome.
+      // Expose only bounded same-origin paths and status metadata; query strings,
+      // headers, bodies, and credentials stay in Chrome.
       const observed = [];
       for (const entry of performance.getEntriesByType("resource")) {
         try {
@@ -65,11 +66,65 @@ async function _cwaCanonicalFetch(tabId, conversationId, timeoutMs) {
       return observed.slice(-40);
     };
     try {
-      const response = await fetch(${JSON.stringify(endpoint)}, {
+      // Resolve the page's authenticated session without exporting bearer material.
+      const sessionResponse = await fetch(${JSON.stringify(sessionEndpoint)}, {
         method: "GET",
         credentials: "include",
         cache: "no-store",
         headers: { accept: "application/json" },
+        signal: controller.signal
+      });
+      const sessionContentType = (sessionResponse.headers.get("content-type") || "").slice(0, 128);
+      if (!sessionResponse.ok) {
+        return {
+          ok: false,
+          status: sessionResponse.status,
+          contentType: sessionContentType,
+          reasonCode: sessionResponse.status === 401
+            ? "CANONICAL_READ_AUTHENTICATION_REQUIRED"
+            : sessionResponse.status === 403
+              ? "CANONICAL_READ_ACCESS_CHALLENGED"
+              : "CANONICAL_READ_SESSION_HTTP_ERROR",
+          retryable: false,
+          routeCandidates: routeCandidates()
+        };
+      }
+      if (!sessionContentType.toLowerCase().includes("json")) {
+        return {
+          ok: false,
+          status: sessionResponse.status,
+          contentType: sessionContentType,
+          reasonCode: "CANONICAL_READ_SESSION_NON_JSON",
+          retryable: false,
+          routeCandidates: routeCandidates()
+        };
+      }
+
+      let session;
+      try {
+        session = await sessionResponse.json();
+      } catch {}
+      const accessToken = typeof session?.accessToken === "string" ? session.accessToken.trim() : "";
+      if (!accessToken) {
+        return {
+          ok: false,
+          status: null,
+          contentType: sessionContentType,
+          reasonCode: "CANONICAL_READ_SESSION_INVALID",
+          retryable: false,
+          routeCandidates: routeCandidates()
+        };
+      }
+
+      // Match ChatGPT's API client: browser session identifies, bearer authorizes detail read.
+      const response = await fetch(${JSON.stringify(endpoint)}, {
+        method: "GET",
+        credentials: "include",
+        cache: "no-store",
+        headers: {
+          accept: "application/json",
+          authorization: "Bearer " + accessToken
+        },
         signal: controller.signal
       });
       const contentType = (response.headers.get("content-type") || "").slice(0, 128);
