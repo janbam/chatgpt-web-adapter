@@ -28,6 +28,34 @@ def test_canonical_read_overlay_fetches_same_origin_and_emits_bounded_exact_chun
     assert "_puid" not in text
 
 
+def test_canonical_read_uses_browser_session_bearer_without_exporting_it():
+    text = (EXT / "service_worker_canonical_read.js").read_text(encoding="utf-8")
+    session_fetch = text.index("fetch(${JSON.stringify(sessionEndpoint)}")
+    canonical_fetch = text.index("fetch(${JSON.stringify(endpoint)}")
+
+    assert session_fetch < canonical_fetch
+    assert "${CHATGPT_ORIGIN}/api/auth/session" in text
+    assert 'const accessToken = typeof session?.accessToken === "string"' in text
+    assert 'authorization: "Bearer " + accessToken' in text
+    assert "accessToken," not in text
+    assert "accessToken:" not in text
+
+
+def test_canonical_read_fails_closed_when_browser_session_is_not_usable():
+    text = (EXT / "service_worker_canonical_read.js").read_text(encoding="utf-8")
+    session_fetch = text.index("fetch(${JSON.stringify(sessionEndpoint)}")
+    canonical_fetch = text.index("fetch(${JSON.stringify(endpoint)}")
+    authentication = text[session_fetch:canonical_fetch]
+
+    assert 'if (!sessionResponse.ok)' in authentication
+    assert 'if (!sessionContentType.toLowerCase().includes("json"))' in authentication
+    assert 'if (!accessToken)' in authentication
+    assert '"CANONICAL_READ_SESSION_HTTP_ERROR"' in authentication
+    assert '"CANONICAL_READ_SESSION_NON_JSON"' in authentication
+    assert '"CANONICAL_READ_SESSION_INVALID"' in authentication
+    assert authentication.count("retryable: false") == 3
+
+
 def test_pr88_release_primitive_lives_below_temporary_wrappers():
     text = (EXT / "service_worker_runtime_tab_reconciliation.js").read_text(
         encoding="utf-8"
