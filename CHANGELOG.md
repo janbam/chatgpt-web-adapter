@@ -6,6 +6,7 @@ The format is intentionally lightweight. Keep entries focused on user-visible be
 
 ## Unreleased
 
+- browser-owned readback: fetch exact canonical conversation JSON inside the authenticated Chrome runtime tab, transfer it through bounded integrity-checked frames, retain Browser Authority through terminal readback, and fail promptly with sanitized metadata when auth, challenge, or protocol errors make reconciliation necessary
 - experimental transport: add explicit `browserless-request` under `ChatGPTProductRuntime` while keeping `browser-owned` as the default `PRODUCTION` transport; browserless remains `EXPERIMENTAL` and uses only the current two-phase Sentinel prepare/finalize plus conversation-prepare/conduit final-write sequence
 - browserless safety: fail closed on required or malformed Sentinel challenge descriptors, never invoke browser/proof challenge providers or legacy/browser fallbacks, strip inherited one-shot requirements/proof/Turnstile/conduit credentials, and never automatically retry an ambiguous write
 - browserless finality: serialize continuation mutation authority per canonical client, refresh queued continuation parents after lock acquisition, enforce one total invocation deadline across queue/preflight/write/recovery/reconciliation, and require submitted assistant identity to match canonical completed-status and readback identity before success

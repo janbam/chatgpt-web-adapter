@@ -45,6 +45,9 @@ class ProductRuntimeHealth:
     read_plane: str
     session_plane: str
     write_plane: str
+    canonical_read_reason_code: str | None = None
+    canonical_read_status_code: int | None = None
+    canonical_read_content_type: str | None = None
     automatic_write_retry: bool = False
     fallback_transport: str | None = None
     # Browser-owned compatibility metadata. Future non-browser transports are not

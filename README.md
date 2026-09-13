@@ -13,13 +13,13 @@ Product-runtime adapter for using an existing ordinary ChatGPT web session from 
 
 ```text
 ChatGPTProductRuntime
-  -> browserless canonical read/status/session plane
+  -> transport-owned canonical read/status plane
   -> explicit ProductWriteTransport
   -> browser-owned page write for protected text turns
-  -> canonical browserless assistant readback
+  -> canonical browser-context assistant readback
 ```
 
-The first proven production write transport is `browser-owned`. It uses one reusable ChatGPT tab owned by the Chrome extension for the protected product write, while canonical reads and session lifecycle remain browserless where possible.
+The first proven production write transport is `browser-owned`. It uses one reusable ChatGPT tab owned by the Chrome extension for the protected product write and authenticated canonical reads. Browserless session lifecycle remains independent, and the `browserless-request` transport retains its curl-backed canonical read plane.
 
 The historical `ChatGPTWebClient` API is still available for compatibility and for capabilities that have not yet graduated into the product runtime. Sentinel/prepared/direct-write and direct browser-native APIs are retained as research or diagnostic surfaces; they are no longer the recommended starting point for new production integrations.
 

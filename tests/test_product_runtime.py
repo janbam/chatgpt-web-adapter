@@ -18,9 +18,25 @@ from chatgpt_web_adapter.product_runtime import (
 
 
 class _Provider:
-    def __init__(self, *, tab_id: int | None = 41, connected: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        tab_id: int | None = 41,
+        connected: bool = True,
+        canonical_status: str = "completed",
+    ) -> None:
         self.tab_id = tab_id
         self.connected = connected
+        self.canonical_status = canonical_status
+
+    def set_browser_authority_lease(self, lease_id):
+        self.lease_id = lease_id
+
+    def complete_canonical_readback(self):
+        return True
+
+    def clear_browser_authority_lease(self):
+        self.lease_id = None
 
     def status(self) -> BrowserNativeBridgeStatus:
         return BrowserNativeBridgeStatus(
@@ -28,6 +44,31 @@ class _Provider:
             extension_connected=self.connected,
             runtime_tab_id=self.tab_id,
         )
+
+    def read_conversation(self, conversation_id, *, timeout=30.0):
+        completed = self.canonical_status == "completed"
+        return {
+            "conversation_id": conversation_id,
+            "current_node": "assistant-1",
+            "mapping": {
+                "assistant-1": {
+                    "parent": None,
+                    "children": [],
+                    "message": {
+                        "id": "assistant-1",
+                        "author": {"role": "assistant"},
+                        "content": {"content_type": "text", "parts": ["answer"]},
+                        "status": "finished_successfully" if completed else "in_progress",
+                        "end_turn": completed,
+                        "metadata": (
+                            {"finish_details": {"type": "stop"}}
+                            if completed
+                            else {}
+                        ),
+                    },
+                }
+            },
+        }
 
     def send_text(self, *args, **kwargs):
         raise AssertionError("test provider write should not be called")
@@ -71,7 +112,10 @@ def test_new_chat_readiness_does_not_require_preexisting_runtime_tab() -> None:
 
 def test_continuation_requires_canonical_completed_status() -> None:
     client = _Client(status="running")
-    runtime = ChatGPTProductRuntime(client, provider=_Provider())
+    runtime = ChatGPTProductRuntime(
+        client,
+        provider=_Provider(canonical_status="running"),
+    )
 
     health = runtime.health("conversation-1")
 

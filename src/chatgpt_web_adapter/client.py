@@ -52,6 +52,7 @@ TRACE_HEADER_REDACT_KEYS = {
     "openai-sentinel-chat-requirements-token",
     "openai-sentinel-proof-token",
     "openai-sentinel-turnstile-token",
+    "x-conduit-token",
 }
 MODEL_ALIASES = {
     "instant": DEFAULT_MODEL,
@@ -500,9 +501,10 @@ class ChatGPTWebClient:
         return trace_dir / f"{counter:04d}-{kind}.json"
 
     def _sanitize_header_value(self, key: str, value: str) -> str:
-        if not bool(getattr(self, "debug_trace_sanitize", True)):
-            return value
-        if key.strip().lower() in TRACE_HEADER_REDACT_KEYS:
+        normalized_key = key.strip().lower()
+        if normalized_key in TRACE_HEADER_REDACT_KEYS:
+            # Credential-bearing headers are never traceable, even when the
+            # operator opts into otherwise unsanitized debugging.
             return TRACE_REDACTED
         return value
 
@@ -522,6 +524,37 @@ class ChatGPTWebClient:
             key, value = raw_line.split(":", 1)
             lines.append(f"{key}: {self._sanitize_header_value(key, value.strip())}")
         return lines
+
+    @staticmethod
+    def _response_content_type(header_text: str) -> str | None:
+        """Return the final response Content-Type from curl's header stream."""
+
+        content_type = None
+        for raw_line in header_text.splitlines():
+            if raw_line.lower().startswith("content-type:"):
+                content_type = raw_line.split(":", 1)[1].strip().lower()
+        return content_type
+
+    def _trace_response_body(
+        self,
+        body: bytes,
+        *,
+        status: int,
+        header_text: str,
+    ) -> dict[str, Any] | None:
+        """Represent response bytes without recording browser-protection material."""
+
+        content_type = self._response_content_type(header_text)
+        if status >= 400 or (content_type and "html" in content_type):
+            # Browser-protection pages can contain ephemeral challenge material;
+            # preserve only bounded structural evidence even in debug mode.
+            return {
+                "kind": "redacted",
+                "size": len(body),
+                "reason": "sensitive_http_error",
+                "content_type": content_type,
+            }
+        return self._trace_bytes_repr(body)
 
     @staticmethod
     def _trace_text_repr(text: str, *, max_chars: int = 200_000) -> dict[str, Any]:
@@ -648,7 +681,11 @@ class ChatGPTWebClient:
                     "request_body": self._trace_bytes_repr(body),
                     "response_status": status,
                     "response_headers": self._sanitize_header_lines(header_text),
-                    "response_body": self._trace_bytes_repr(raw_body),
+                    "response_body": self._trace_response_body(
+                        raw_body,
+                        status=status,
+                        header_text=header_text,
+                    ),
                     "stderr": stderr_text or None,
                     "return_code": return_code,
                     "error": error_text,
@@ -1397,9 +1434,19 @@ class ChatGPTWebClient:
             headers,
         )
         if status >= 400:
-            raise RequestError(f"conversation status={status}: {data}")
+            raise RequestError(
+                f"conversation request failed: status={status}",
+                status_code=status,
+                endpoint="conversation",
+                request_stage="conversation_fetch",
+            )
         if not isinstance(data, dict):
-            raise RequestError("conversation response expected JSON object")
+            raise RequestError(
+                "conversation response expected JSON object",
+                status_code=status or None,
+                endpoint="conversation",
+                request_stage="conversation_fetch",
+            )
         return data
 
     def _list_recent_conversations(self, *, limit: int = 10) -> list[dict[str, Any]]:
@@ -1411,7 +1458,12 @@ class ChatGPTWebClient:
             headers,
         )
         if status >= 400:
-            raise RequestError(f"conversations status={status}: {data}")
+            raise RequestError(
+                f"conversations request failed: status={status}",
+                status_code=status,
+                endpoint="conversations",
+                request_stage="conversation_list",
+            )
         if not isinstance(data, dict):
             raise RequestError("conversations response expected JSON object")
         items = data.get("items")

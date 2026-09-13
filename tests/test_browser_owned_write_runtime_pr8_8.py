@@ -35,6 +35,9 @@ class FakeProvider:
     def set_browser_authority_lease(self, lease_id):
         self.bound = lease_id
 
+    def complete_canonical_readback(self):
+        return True
+
     def clear_browser_authority_lease(self):
         self.bound = None
 
@@ -115,7 +118,7 @@ def test_default_persistent_releases_lease_but_never_closes_tab(monkeypatch):
     assert provider.releases == []
 
 
-def test_write_event_releases_browser_authority_before_turn_finality(monkeypatch):
+def test_browser_authority_stays_active_until_readback_finality(monkeypatch):
     provider = FakeProvider()
     rt = runtime(provider)
     states = []
@@ -132,10 +135,46 @@ def test_write_event_releases_browser_authority_before_turn_finality(monkeypatch
     assert rt.send_text("hello") is result
 
     middle = states[0]
-    assert middle["browser_authority_lease"]["state"] == "RELEASED"
+    assert middle["browser_authority_lease"]["state"] == "ACTIVE"
     assert middle["turn_lifecycle"]["state"] == "WRITE_COMPLETED"
     assert middle["turn_lifecycle"]["logical_turn_terminal"] is False
-    assert rt.lifecycle_snapshot()["turn_lifecycle"]["state"] == "FINALIZED"
+    final = rt.lifecycle_snapshot()
+    assert final["browser_authority_lease"]["state"] == "RELEASED"
+    assert final["turn_lifecycle"]["state"] == "FINALIZED"
+
+
+def test_failed_host_acknowledgement_prevents_false_authority_release(monkeypatch):
+    class AckFailureProvider(FakeProvider):
+        def complete_canonical_readback(self):
+            return False
+
+    provider = AckFailureProvider()
+    rt = runtime(provider)
+    fake_success(subject, monkeypatch)
+
+    with pytest.raises(subject.BrowserOwnedWriteRuntimeError) as caught:
+        rt.send_text("hello")
+
+    assert caught.value.failure_kind == subject.WRITE_ACCEPTED_READBACK_INCOMPLETE
+    assert caught.value.reason_code is None
+    assert caught.value.browser_authority_lease.state is BrowserAuthorityLeaseState.RELEASE_UNKNOWN
+    assert provider.releases == []
+
+
+def test_observer_failure_cannot_interrupt_readback_or_authority_release(monkeypatch):
+    provider = FakeProvider()
+    rt = runtime(provider)
+    fake_success(subject, monkeypatch)
+
+    def fail_observer(_event):
+        raise RuntimeError("observer failed")
+
+    response = rt.send_text("hello", on_event=fail_observer)
+
+    assert response.text == "ok"
+    snapshot = rt.lifecycle_snapshot()
+    assert snapshot["browser_authority_lease"]["state"] == "RELEASED"
+    assert snapshot["turn_lifecycle"]["state"] == "FINALIZED"
 
 
 def test_turn_scoped_zero_ttl_closes_only_after_release(monkeypatch):

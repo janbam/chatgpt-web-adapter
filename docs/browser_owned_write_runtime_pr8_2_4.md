@@ -4,7 +4,7 @@ PR8.2.0–PR8.2.3 established that ordinary ChatGPT canonical reads and session 
 
 ## Runtime split
 
-- **Read plane:** `BROWSERLESS_CANONICAL_HTTP`
+- **Read plane:** `BROWSER_CONTEXT_CANONICAL_HTTP`
 - **Session plane:** `BROWSERLESS_SESSION_HTTP`
 - **Write plane:** `BROWSER_NATIVE_PAGE_OWNED_WRITE`
 
@@ -16,7 +16,7 @@ The production facade never launches a browser. Browser/session bootstrap remain
 
 For a new conversation, readiness requires only a live Native Messaging bridge and connected extension. A pre-existing runtime tab is diagnostic only.
 
-For continuation, canonical browserless status must also be `completed`, and it is rechecked at the commit point immediately before browser delegation. A running, tool-active, unknown, or unreadable conversation is rejected before browser-native delegation.
+For continuation, canonical browser-context status must also be `completed`, and it is rechecked at the commit point immediately before browser delegation. A running, tool-active, unknown, or unreadable conversation is rejected before browser-native delegation.
 
 ## Failure semantics
 
@@ -35,7 +35,7 @@ If the browser-owned write succeeded but canonical final assistant readback time
 - no automatic write retry;
 - no foreground activation requirement;
 - runtime tab may be created lazily by the already connected extension;
-- canonical SDK readback remains the source of assistant response truth.
+- exact canonical JSON fetched in the authenticated runtime tab remains the source of assistant response truth.
 
 ## Operator probe
 

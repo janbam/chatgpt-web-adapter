@@ -34,6 +34,20 @@ class _Canonical:
         return SimpleNamespace(conversation_id=conversation)
 
 
+class _ReadCapableProvider:
+    def read_conversation(self, *args, **kwargs):
+        raise AssertionError("constructor tests must not perform canonical reads")
+
+    def set_browser_authority_lease(self, lease_id):
+        self.lease_id = lease_id
+
+    def complete_canonical_readback(self):
+        return True
+
+    def clear_browser_authority_lease(self):
+        self.lease_id = None
+
+
 class _PolicyTransport:
     transport_id = "browser-owned"
 
@@ -351,7 +365,7 @@ def test_browser_owned_transport_passes_runtime_defaults_to_lower_runtime(monkey
         FakeLowerRuntime,
     )
     canonical = _Canonical()
-    provider = object()
+    provider = _ReadCapableProvider()
 
     transport = browser_transport.BrowserOwnedProductTransport(
         canonical,
@@ -361,7 +375,7 @@ def test_browser_owned_transport_passes_runtime_defaults_to_lower_runtime(monkey
     )
 
     assert captured == {
-        "client": canonical,
+        "client": transport.canonical_client,
         "provider": provider,
         "browser_authority_policy": "IDLE_TTL",
         "browser_authority_ttl_ms": 5000,
@@ -397,7 +411,7 @@ def test_browser_owned_transport_default_remains_persistent_and_constructor_shap
         FakeLowerRuntime,
     )
     canonical = _Canonical()
-    provider = object()
+    provider = _ReadCapableProvider()
 
     transport = browser_transport.BrowserOwnedProductTransport(
         canonical,
@@ -405,7 +419,7 @@ def test_browser_owned_transport_default_remains_persistent_and_constructor_shap
     )
 
     assert captured == {
-        "client": canonical,
+        "client": transport.canonical_client,
         "provider": provider,
     }
     governance = transport.governance()

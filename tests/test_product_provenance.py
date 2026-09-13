@@ -27,7 +27,7 @@ def test_canonical_readback_completion_does_not_synthesize_finish_reason() -> No
         governance={
             "product_semantics": "ordinary-chatgpt",
             "canonical_readback_required": True,
-            "read_plane": "BROWSERLESS_CANONICAL_HTTP",
+            "read_plane": "BROWSER_CONTEXT_CANONICAL_HTTP",
             "session_plane": "BROWSERLESS_SESSION_HTTP",
             "write_plane": "BROWSER_NATIVE_PAGE_OWNED_WRITE",
         },

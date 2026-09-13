@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import json
+import re
 import socket
 import threading
 import time
@@ -54,6 +58,171 @@ class BrowserNativeRuntimeTabReleaseResult:
     already_absent: bool
     runtime_tab_id: int | None
     browser_authority_lease_id: str
+
+
+class BrowserNativeCanonicalReadError(RequestError):
+    """Safe failure metadata from a browser-context canonical conversation read."""
+
+    def __init__(
+        self,
+        reason_code: str,
+        *,
+        conversation_id: str,
+        status_code: int | None = None,
+        content_type: str | None = None,
+        retryable: bool = False,
+        route_candidates: list[dict[str, Any]] | None = None,
+    ) -> None:
+        self.reason_code = reason_code
+        self.conversation_id = conversation_id
+        self.content_type = content_type
+        self.retryable = bool(retryable)
+        # Keep diagnostics useful without letting bridge-provided metadata expand the error surface.
+        self.route_candidates = self._safe_route_candidates(route_candidates)
+        details = [f"reason={reason_code}"]
+        if status_code is not None:
+            details.append(f"status={status_code}")
+        if content_type:
+            details.append(f"content_type={content_type}")
+        super().__init__(
+            f"browser canonical read failed: {' '.join(details)}",
+            status_code=status_code,
+            endpoint="conversation",
+            request_stage="browser_native_canonical_read",
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = super().to_dict()
+        payload.update(
+            {
+                "reason_code": self.reason_code,
+                "conversation_id": self.conversation_id,
+                "content_type": self.content_type,
+                "retryable": self.retryable,
+                "route_candidates": self.route_candidates,
+            }
+        )
+        return payload
+
+    @staticmethod
+    def _safe_route_candidates(
+        candidates: list[dict[str, Any]] | None,
+    ) -> list[dict[str, str | int | None]]:
+        """Return bounded, non-sensitive route diagnostics from the extension response."""
+
+        if not isinstance(candidates, list):
+            return []
+
+        safe_candidates: list[dict[str, str | int | None]] = []
+        # Preserve only the explicitly supported fields so error serialization cannot leak new bridge data.
+        for candidate in candidates[-40:]:
+            if not isinstance(candidate, dict):
+                continue
+            path = candidate.get("path")
+            if (
+                not isinstance(path, str)
+                or not path.startswith("/")
+                or "?" in path
+                or "#" in path
+            ):
+                continue
+            initiator_type = candidate.get("initiatorType")
+            response_status = candidate.get("responseStatus")
+            safe_candidates.append(
+                {
+                    "path": path[:256],
+                    "initiator_type": initiator_type[:32]
+                    if isinstance(initiator_type, str)
+                    else "",
+                    "response_status": response_status
+                    if isinstance(response_status, int) and not isinstance(response_status, bool)
+                    else None,
+                }
+            )
+        return safe_candidates
+
+
+class _CanonicalReadChunkCollector:
+    """Validate and reassemble one exact canonical response without oversized frames."""
+
+    def __init__(self, *, request_id: str, conversation_id: str) -> None:
+        self.request_id = request_id
+        self.conversation_id = conversation_id
+        self.chunks: dict[int, bytes] = {}
+        self.chunk_count: int | None = None
+        self.total_bytes: int | None = None
+        self.sha256: str | None = None
+        self.error_reason: str | None = None
+
+    def add(self, frame: dict[str, Any]) -> None:
+        """Accept the next ordered chunk or retain its first integrity failure."""
+
+        if self.error_reason is not None:
+            return
+        try:
+            # Bind every chunk to one request and one immutable transfer manifest.
+            if frame.get("request_id") != self.request_id:
+                raise ValueError("CANONICAL_READ_CHUNK_REQUEST_MISMATCH")
+            index = frame.get("chunkIndex")
+            count = frame.get("chunkCount")
+            total_bytes = frame.get("totalBytes")
+            digest = frame.get("sha256")
+            data = frame.get("data")
+            if (
+                isinstance(index, bool)
+                or not isinstance(index, int)
+                or isinstance(count, bool)
+                or not isinstance(count, int)
+                or count <= 0
+                or not 0 <= index < count
+            ):
+                raise ValueError("CANONICAL_READ_CHUNK_INDEX_INVALID")
+            if isinstance(total_bytes, bool) or not isinstance(total_bytes, int) or total_bytes < 0:
+                raise ValueError("CANONICAL_READ_TOTAL_BYTES_INVALID")
+            if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+                raise ValueError("CANONICAL_READ_DIGEST_INVALID")
+            if not isinstance(data, str):
+                raise ValueError("CANONICAL_READ_CHUNK_DATA_INVALID")
+            manifest = (count, total_bytes, digest)
+            current = (self.chunk_count, self.total_bytes, self.sha256)
+            if self.chunk_count is not None and current != manifest:
+                raise ValueError("CANONICAL_READ_CHUNK_MANIFEST_MISMATCH")
+            if index in self.chunks:
+                raise ValueError("CANONICAL_READ_CHUNK_DUPLICATE")
+            if index != len(self.chunks):
+                raise ValueError("CANONICAL_READ_CHUNK_ORDER_INVALID")
+            self.chunk_count, self.total_bytes, self.sha256 = manifest
+            self.chunks[index] = base64.b64decode(data, validate=True)
+        except (ValueError, TypeError) as error:
+            self.error_reason = str(error) or "CANONICAL_READ_CHUNK_INVALID"
+
+    def finish(self, response: dict[str, Any]) -> bytes:
+        """Seal the manifest and return bytes only after all integrity checks pass."""
+
+        if self.error_reason is not None:
+            raise ValueError(self.error_reason)
+
+        # Require the final frame to repeat and seal the transfer manifest.
+        final_manifest = (
+            response.get("chunkCount"),
+            response.get("totalBytes"),
+            response.get("sha256"),
+        )
+        expected_manifest = (self.chunk_count, self.total_bytes, self.sha256)
+        if expected_manifest != final_manifest:
+            raise ValueError("CANONICAL_READ_FINAL_MANIFEST_MISMATCH")
+        if self.chunk_count is None or len(self.chunks) != self.chunk_count:
+            raise ValueError("CANONICAL_READ_CHUNK_MISSING")
+        if set(self.chunks) != set(range(self.chunk_count)):
+            raise ValueError("CANONICAL_READ_CHUNK_SEQUENCE_INVALID")
+
+        body = b"".join(self.chunks[index] for index in range(self.chunk_count))
+        if len(body) != self.total_bytes:
+            raise ValueError("CANONICAL_READ_TOTAL_BYTES_MISMATCH")
+        actual_digest = hashlib.sha256(body).hexdigest()
+        if self.sha256 is None or not hmac.compare_digest(actual_digest, self.sha256):
+            raise ValueError("CANONICAL_READ_DIGEST_MISMATCH")
+        return body
 
 
 class BrowserNativeTurnProvider:
@@ -160,19 +329,24 @@ class BrowserNativeTurnProvider:
                                 "BROWSER_NATIVE_PROTOCOL_MISMATCH: invalid broker response",
                                 request_stage="browser_native_bridge",
                             )
-                        if response.get("type") == "turn_event":
+                        response_type = response.get("type")
+                        if response_type in {"turn_event", "canonical_read_chunk"}:
                             if response.get("request_id") != payload.get("request_id"):
                                 raise RequestError(
                                     "BROWSER_NATIVE_RESPONSE_MISMATCH",
                                     request_stage="browser_native_bridge",
                                 )
-                            event = response.get("event")
-                            if isinstance(event, dict) and on_event is not None:
+                            callback_payload = (
+                                response.get("event")
+                                if response_type == "turn_event"
+                                else response
+                            )
+                            if isinstance(callback_payload, dict) and on_event is not None:
                                 try:
-                                    on_event(dict(event))
+                                    on_event(dict(callback_payload))
                                 except Exception:
-                                    # Observation callbacks cannot invalidate or
-                                    # replay an already-delegated product write.
+                                    # Intermediate delivery cannot replay a delegated
+                                    # write; canonical integrity is checked at finalization.
                                     pass
                             continue
                         return response
@@ -190,6 +364,135 @@ class BrowserNativeTurnProvider:
             f"BROWSER_NATIVE_BRIDGE_UNAVAILABLE: {last_error}",
             request_stage="browser_native_bridge",
         ) from last_error
+
+    def complete_canonical_readback(self) -> bool:
+        """Release the leased host lane after Python proves read terminality."""
+
+        lease_id = self._current_browser_authority_lease_id()
+        if lease_id is None:
+            return True
+        deadline = time.monotonic() + max(1.0, self.connect_timeout + 5.5)
+        while time.monotonic() < deadline:
+            try:
+                response = self._rpc(
+                    {
+                        "type": "canonical_read_complete",
+                        "request_id": str(uuid.uuid4()),
+                        "browserAuthorityLeaseId": lease_id,
+                    },
+                    timeout=min(
+                        self.connect_timeout,
+                        max(0.1, deadline - time.monotonic()),
+                    ),
+                )
+            except RequestError:
+                response = None
+            if isinstance(response, dict) and response.get("ok") is True:
+                return True
+            if (
+                isinstance(response, dict)
+                and response.get("error") != "BROWSER_NATIVE_BRIDGE_BUSY"
+            ):
+                return False
+            time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+        # The host's bounded reservation expiry remains the crash-safe fallback.
+        return False
+
+    def read_conversation(
+        self,
+        conversation_id: str,
+        *,
+        timeout: float = 30.0,
+    ) -> dict[str, Any]:
+        """Fetch and verify one exact canonical conversation payload in Chrome."""
+
+        ref = ConversationRef(conversation_id)
+        if timeout <= 0:
+            raise ValueError("timeout must be positive")
+        request_id = str(uuid.uuid4())
+        lease_id = self._current_browser_authority_lease_id()
+        collector = _CanonicalReadChunkCollector(
+            request_id=request_id,
+            conversation_id=ref.conversation_id,
+        )
+        response = self._rpc(
+            {
+                "type": "canonical_read",
+                "request_id": request_id,
+                "conversationId": ref.conversation_id,
+                "timeoutMs": int(timeout * 1000),
+                "browserAuthorityLeaseId": lease_id,
+            },
+            timeout=timeout + 6.0,
+            on_event=collector.add,
+        )
+        if response.get("request_id") != request_id:
+            raise BrowserNativeCanonicalReadError(
+                "CANONICAL_READ_RESPONSE_MISMATCH",
+                conversation_id=ref.conversation_id,
+            )
+        if not response.get("ok"):
+            reason = response.get("reasonCode") or response.get("error")
+            reason_code = (
+                reason
+                if isinstance(reason, str) and re.fullmatch(r"[A-Z0-9_]+", reason)
+                else "CANONICAL_READ_FAILED"
+            )
+            status = response.get("status")
+            status_code = (
+                status
+                if isinstance(status, int) and not isinstance(status, bool)
+                else None
+            )
+            content_type = response.get("contentType")
+            raise BrowserNativeCanonicalReadError(
+                reason_code,
+                conversation_id=ref.conversation_id,
+                status_code=status_code,
+                content_type=content_type[:128]
+                if isinstance(content_type, str) and content_type
+                else None,
+                retryable=response.get("retryable") is True,
+                route_candidates=response.get("routeCandidates"),
+            )
+        if response.get("type") != "canonical_read_result":
+            raise BrowserNativeCanonicalReadError(
+                "CANONICAL_READ_RESULT_TYPE_INVALID",
+                conversation_id=ref.conversation_id,
+            )
+
+        try:
+            raw_body = collector.finish(response)
+            payload = json.loads(raw_body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
+            reason = str(error)
+            reason_code = (
+                reason
+                if re.fullmatch(r"[A-Z0-9_]+", reason or "")
+                else "CANONICAL_READ_MALFORMED_JSON"
+            )
+            raise BrowserNativeCanonicalReadError(
+                reason_code,
+                conversation_id=ref.conversation_id,
+                status_code=response.get("status")
+                if isinstance(response.get("status"), int)
+                else None,
+                content_type=response.get("contentType")
+                if isinstance(response.get("contentType"), str)
+                else None,
+            ) from error
+        if not isinstance(payload, dict):
+            raise BrowserNativeCanonicalReadError(
+                "CANONICAL_READ_JSON_OBJECT_REQUIRED",
+                conversation_id=ref.conversation_id,
+                status_code=response.get("status")
+                if isinstance(response.get("status"), int)
+                else None,
+                content_type=response.get("contentType")
+                if isinstance(response.get("contentType"), str)
+                else None,
+            )
+        return payload
 
     def status(self) -> BrowserNativeBridgeStatus:
         try:

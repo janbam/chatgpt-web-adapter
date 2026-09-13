@@ -157,6 +157,18 @@ class _ProfileProvider:
         self.active = None
         self.entries = []
 
+    def read_conversation(self, *args, **kwargs):
+        raise AssertionError("profile tests must not perform canonical reads")
+
+    def set_browser_authority_lease(self, lease_id):
+        self.lease_id = lease_id
+
+    def complete_canonical_readback(self):
+        return True
+
+    def clear_browser_authority_lease(self):
+        self.lease_id = None
+
     def send_text(self, *args, **kwargs):
         raise AssertionError("profile provider double must not send directly")
 
@@ -173,6 +185,18 @@ class _ProfileProvider:
 
 
 class _NoProfileProvider:
+    def read_conversation(self, *args, **kwargs):
+        raise AssertionError("profile tests must not perform canonical reads")
+
+    def set_browser_authority_lease(self, lease_id):
+        self.lease_id = lease_id
+
+    def complete_canonical_readback(self):
+        return True
+
+    def clear_browser_authority_lease(self):
+        self.lease_id = None
+
     def send_text(self, *args, **kwargs):
         raise AssertionError("non-profile provider double must not send directly")
 

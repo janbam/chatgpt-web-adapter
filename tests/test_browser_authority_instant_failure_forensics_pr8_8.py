@@ -215,7 +215,7 @@ def make_runner(route_match=True):
 def test_extension_failure_layer_is_additive_and_does_not_add_product_mutation():
     root = browser_native_extension_dir()
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["version"] == "0.1.13"
+    assert manifest["version"] == "0.1.14"
     observability = (root / "service_worker_observability.js").read_text(encoding="utf-8")
     worker = (root / "service_worker_instant_failure_forensics_pr8_8.js").read_text(encoding="utf-8")
     prior = 'importScripts("service_worker_orphan_lease_reconciliation_pr8_8.js")'

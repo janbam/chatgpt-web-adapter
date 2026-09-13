@@ -4,7 +4,10 @@ import inspect
 import time
 from typing import Any, Callable
 
-from .browser_native_provider import BrowserNativeTurnProvider
+from .browser_native_provider import (
+    BrowserNativeCanonicalReadError,
+    BrowserNativeTurnProvider,
+)
 from .exceptions import ConversationTimeoutError, RequestError
 from .messages import _chat_message_from_node, _current_branch_nodes
 from .revision_safe_streaming_pr8_9 import RevisionSafeTextAccumulator
@@ -107,7 +110,15 @@ def _wait_for_new_final_assistant(
             try:
                 canonical_payload_read_count += 1
                 payload = canonical_reader(conversation_id)
-            except Exception:
+            except BrowserNativeCanonicalReadError as error:
+                # Only a canonical 404 means the just-created conversation may
+                # not be visible yet. Auth, challenge, and protocol failures stop.
+                if not (
+                    error.retryable
+                    and error.reason_code == "CANONICAL_READ_NOT_VISIBLE"
+                    and error.status_code == 404
+                ):
+                    raise
                 payload = None
 
             if isinstance(payload, dict):
@@ -209,6 +220,7 @@ def send_browser_native(
     poll_interval: float = 0.5,
     on_token: Callable[[str], None] | None = None,
     on_event: Callable[[dict[str, Any]], None] | None = None,
+    browser_authority_lease_id: str | None = None,
 ) -> ChatResponse:
     """Send one ordinary text turn through the persistent ChatGPT browser tab.
 
@@ -270,6 +282,18 @@ def send_browser_native(
     streaming_requested = (
         on_event is not None and _provider_supports_revision_safe_streaming(provider)
     )
+
+    # Baseline and continuation checks intentionally run without the new lease;
+    # bind it only at the page-write boundary that installs it in Chrome.
+    if browser_authority_lease_id is not None:
+        set_lease = getattr(provider, "set_browser_authority_lease", None)
+        if not callable(set_lease):
+            raise RequestError(
+                "BROWSER_NATIVE_AUTHORITY_LEASE_UNSUPPORTED",
+                request_stage="browser_authority_commit",
+            )
+        set_lease(browser_authority_lease_id)
+
     if recovery_authorized:
         canonical_completed_at_ms = int(time.time() * 1000)
         if streaming_requested and callable(recovery_stream_send):
@@ -375,7 +399,12 @@ def send_browser_native(
     _emit_revision_safe_event(self, on_event, finalization)
 
     if on_token is not None and response.text:
-        on_token(response.text)
+        try:
+            on_token(response.text)
+        except Exception:
+            # Final-only observers cannot invalidate an already completed write
+            # or suppress the terminal readback event that releases authority.
+            pass
     self._emit_event(
         on_event,
         "browser_native_readback_completed",

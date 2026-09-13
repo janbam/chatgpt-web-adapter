@@ -6,7 +6,7 @@ from chatgpt_web_adapter.browser_native_install import browser_native_extension_
 
 def test_worker_order_and_mutation_boundary():
     root = browser_native_extension_dir()
-    assert json.loads((root / "manifest.json").read_text(encoding="utf-8"))["version"] == "0.1.13"
+    assert json.loads((root / "manifest.json").read_text(encoding="utf-8"))["version"] == "0.1.14"
     obs = (root / "service_worker_observability.js").read_text(encoding="utf-8")
     names = [
         "service_worker_instant_popup_subtree_forensics_pr8_8.js",

@@ -29,6 +29,7 @@ from .browser_native_install import (
 )
 from .browser_native_protocol import HOST_NAME
 from .browser_native_provider import BrowserNativeTurnProvider
+from .exceptions import RequestError
 from .product_runtime import (
     DEFAULT_PRODUCT_TRANSPORT,
     assemble_product_runtime,
@@ -175,8 +176,22 @@ def _skip(check_id: str, section: str, summary: str) -> DoctorCheck:
     )
 
 
-def _safe_error(error: BaseException) -> dict[str, str]:
-    return {"type": type(error).__name__, "message": str(error)}
+def _safe_error(error: BaseException) -> dict[str, Any]:
+    if isinstance(error, RequestError):
+        return {
+            "type": type(error).__name__,
+            "request_stage": error.request_stage,
+            "status_code": error.status_code,
+            "endpoint": error.endpoint,
+            "reason_code": getattr(error, "reason_code", None),
+            "content_type": getattr(error, "content_type", None),
+        }
+    message = str(error)
+    return {
+        "type": type(error).__name__,
+        "message": message[:500],
+        "message_truncated": len(message) > 500,
+    }
 
 
 def _environment_checks() -> list[DoctorCheck]:
@@ -676,6 +691,42 @@ def _runtime_checks(
                 )
             )
 
+        if conversation is not None:
+            canonical_evidence = {
+                "conversation_id": getattr(health, "conversation_id", conversation),
+                "canonical_read_checked": getattr(health, "canonical_read_checked", False),
+                "read_plane": getattr(health, "read_plane", None),
+                "canonical_status": getattr(health, "canonical_status", None),
+                "reason_code": getattr(health, "canonical_read_reason_code", None),
+                "status_code": getattr(health, "canonical_read_status_code", None),
+                "content_type": getattr(health, "canonical_read_content_type", None),
+            }
+            if (
+                canonical_evidence["canonical_read_checked"]
+                and canonical_evidence["canonical_status"] is not None
+            ):
+                checks.append(
+                    _pass(
+                        "runtime.canonical_read_route",
+                        "runtime",
+                        "Selected canonical read route returned conversation state",
+                        evidence=canonical_evidence,
+                    )
+                )
+            else:
+                checks.append(
+                    _fail(
+                        "runtime.canonical_read_route",
+                        "runtime",
+                        "Selected canonical read route could not prove conversation state",
+                        evidence=canonical_evidence,
+                        remediation=(
+                            "Repair the reported canonical read route; do not retry "
+                            "an already-delegated write."
+                        ),
+                    )
+                )
+
         safety_ok = (
             health.automatic_write_retry is False
             and health.fallback_transport is None
@@ -724,13 +775,15 @@ def _runtime_checks(
             "required": list(_REQUIRED_CAPABILITIES),
             "states": states,
             "unavailable": unavailable,
+            "runtime_proof": False,
+            "proof_command": "cwa doctor --conversation <id>",
         }
         if not unavailable:
             checks.append(
                 _pass(
                     "runtime.required_capabilities",
                     "runtime",
-                    "Required CWA 0.2 product capabilities are available",
+                    "Required CWA 0.2 product capabilities are declared available",
                     evidence=evidence,
                 )
             )

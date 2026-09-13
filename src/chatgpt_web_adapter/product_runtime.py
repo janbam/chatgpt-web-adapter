@@ -333,6 +333,12 @@ class ChatGPTProductRuntime:
         self._transport = write_transport
         self._writer = getattr(write_transport, "_runtime", write_transport)
 
+        # Runtime inspection follows the selected transport's canonical plane;
+        # browserless and injected transports retain their supplied client.
+        transport_canonical = getattr(write_transport, "canonical_client", None)
+        if self.transport == BROWSER_OWNED_PRODUCT_TRANSPORT and transport_canonical is not None:
+            self.canonical = require_canonical_conversation_client(transport_canonical)
+
     def health(
         self,
         conversation: ConversationInput = None,
