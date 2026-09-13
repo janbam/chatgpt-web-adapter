@@ -75,8 +75,9 @@ def test_returned_identity_excludes_provisional_stream_and_route_ids() -> None:
     return_start = source.index("// Prefer stream metadata")
     return_block = source[return_start:]
 
-    assert "_pr811CanonicalConversationId(safeMetadata.conversationId)" in return_block
-    assert "|| urlConversationId" in return_block
+    assert "_pr811SelectCanonicalConversationId(" in return_block
+    assert "safeMetadata.conversationId," in return_block
+    assert "rawUrlConversationId" in return_block
     assert "conversationId," in return_block
     assert "safeMetadata.conversationId || urlConversationId" not in return_block
 

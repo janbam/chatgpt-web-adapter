@@ -36,6 +36,12 @@ function _pr811CanonicalConversationId(value) {
   return conversationId && !/^WEB:/i.test(conversationId) ? conversationId : null;
 }
 
+/** Prefer canonical stream identity, then canonical route identity. */
+function _pr811SelectCanonicalConversationId(streamValue, routeValue) {
+  return _pr811CanonicalConversationId(streamValue)
+    || _pr811CanonicalConversationId(routeValue);
+}
+
 async function _pr811ReloadRuntimeTabAndWait(tabId, expectedConversationId) {
   const startedAt = performance.now();
   await new Promise((resolve, reject) => {
@@ -293,8 +299,10 @@ executeOfficialPageTurn = async function _executeOfficialPageTurnWithEarlyTermin
     }
 
     // Prefer stream metadata, but return only identities safe for canonical readback.
-    const conversationId = _pr811CanonicalConversationId(safeMetadata.conversationId)
-      || urlConversationId;
+    const conversationId = _pr811SelectCanonicalConversationId(
+      safeMetadata.conversationId,
+      rawUrlConversationId
+    );
     diagnostics.elapsedMs = elapsedMs(startedAt);
     return {
       diagnostics,
