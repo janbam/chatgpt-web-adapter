@@ -114,7 +114,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     send = commands.add_parser(
         "send",
-        help="send one ChatGPT product turn; defaults to DEEP / product HIGH",
+        help="send one ChatGPT product turn; defaults to product HIGH",
     )
     add_auth_file(send)
     send.add_argument("text")
@@ -133,12 +133,18 @@ def _build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_PRODUCT_TRANSPORT,
         help="explicit product transport; no automatic fallback is performed",
     )
-    send.add_argument(
+    profile_selection = send.add_mutually_exclusive_group()
+    profile_selection.add_argument(
         "--profile",
         type=normalize_standalone_model_profile,
         choices=STANDALONE_MODEL_PROFILES,
         default=DEFAULT_STANDALONE_MODEL_PROFILE,
-        help="semantic model profile; default DEEP maps to proven product HIGH",
+        help="product model profile; default HIGH",
+    )
+    profile_selection.add_argument(
+        "--skip-profile",
+        action="store_true",
+        help="use the model and thinking level already active in ChatGPT",
     )
     send.add_argument("--timeout", type=float, default=150.0)
     send.add_argument("--poll-interval", type=float, default=0.5)
@@ -364,7 +370,7 @@ def _run_send(args: argparse.Namespace) -> int:
             timeout=args.timeout,
             poll_interval=args.poll_interval,
             on_event=on_event,
-            model_profile=args.profile,
+            model_profile=None if args.skip_profile else args.profile,
             conversation_mode="temporary" if args.temporary else "normal",
         )
         if timing_observer is not None:

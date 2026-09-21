@@ -112,15 +112,24 @@ def test_selection_validation_requires_exact_prewrite_proof() -> None:
         _validate_selection("DEEP", "lease-1", bad)
 
 
-def test_extension_uses_semantic_keyboard_slider_selection_and_no_option_guessing() -> None:
+def test_extension_uses_current_power_slider_and_bypasses_obsolete_selector() -> None:
     source = (EXTENSION / "service_worker_model_profile_selection_pr8_10.js").read_text(
         encoding="utf-8"
     )
     assert 'INSTANT: 0, MEDIUM: 1, HIGH: 2' in source
-    assert '_pr88InstantEffortDispatchHome(debuggee)' in source
+    assert 'const PR810_POWER_SLIDER_MAX = 3;' in source
+    assert '[data-model-reasoning-effort-slider] [role="slider"]' in source
+    assert "'thinking effort', 'instant', 'medium', 'high', 'pro'" in source
+    assert "'[role=\"menuitem\"][aria-label=\"Power\"]'" in source
+    assert '"Input.dispatchMouseEvent"' in source
+    assert "trigger.click()" not in source
+    assert '_pr810DispatchKey(debuggee, "ArrowLeft", "ArrowLeft", 37)' in source
     assert '"ArrowRight"' in source
     assert 'selectedModeAfterProven' in source
     assert 'conversationWriteBeforeSelection' in source
+    assert "delete priorMessage.requiredModelMode" in source
+    assert "_pr88SelectionPoint" not in source
+    assert "_pr88InstantEffortResolvedSliderSnapshot" not in source
     assert "Fetch.enable" not in source
     assert "Network.getResponseBody" not in source
 

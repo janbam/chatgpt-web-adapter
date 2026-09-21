@@ -1,6 +1,6 @@
-# PR8.14 — Stable Product Inspection CLI, Product-Native Model Profile Aliases and Exit-Code Contract
+# PR8.14 — Stable Product Inspection CLI and Exit-Code Contract
 
-_Status: CLOSED / PASS_
+_Status: CLOSED / PASS; profile-alias section updated for the current CLI contract_
 
 _Date: 2026-08-21_
 
@@ -39,17 +39,15 @@ export   = broader/raw archival representation
 messages != snapshot != export
 ```
 
-## Product-native model profile aliases
+## Model profile input
 
-The already-proven mapping is accepted directly by the public CLI:
+The public CLI accepts only the product names:
 
 ```text
-FAST     <-> INSTANT
-BALANCED <-> MEDIUM
-DEEP     <-> HIGH
+INSTANT
+MEDIUM
+HIGH
 ```
-
-Product-native names are first-class input:
 
 ```powershell
 cwa send "..." --profile INSTANT
@@ -57,15 +55,11 @@ cwa send "..." --profile MEDIUM
 cwa send "..." --profile HIGH
 ```
 
-Existing semantic names remain compatible. Input normalizes before the existing selector:
+The CLI translates these values to the existing internal runtime keys. `FAST`, `BALANCED`, and `DEEP` are not public aliases and are rejected by `cwa send`. `MAX` remains unsupported.
 
-```text
-INSTANT -> FAST     -> product INSTANT
-MEDIUM  -> BALANCED -> product MEDIUM
-HIGH    -> DEEP     -> product HIGH
-```
+The public default is `HIGH`.
 
-The public default is `HIGH`; the existing internal semantic key remains `DEEP`. No selector, slider-index, Browser Authority, prewrite selection, or provenance semantics change. `MAX` remains unmapped because no fourth product state is proven.
+`cwa send "..." --skip-profile` bypasses profile selection and preserves the model and thinking level already active in ChatGPT. It is mutually exclusive with `--profile`.
 
 ## Machine-readable schema
 
@@ -103,7 +97,9 @@ relevant CLI/runtime          27 passed in 0.25s
 full repository suite       1246 passed in 23.31s
 ```
 
-## Production CLI smoke evidence
+## Historical production CLI smoke evidence
+
+The following evidence records the original PR8.14 alias contract. Those aliases have since been removed from the public CLI.
 
 `cwa capabilities --json` passed with:
 
@@ -160,4 +156,4 @@ The returned schema, conversation id, normalized user message, assistant respons
 
 ## Closure
 
-PR8.14 is closed as PASS. The stable public surface now includes read-only `status`, `capabilities`, and `messages`; product-native profile names are first-class aliases; and CLI exit classes are frozen for the 0.2 stabilization line.
+PR8.14 is closed as PASS. The stable public surface includes read-only `status`, `capabilities`, and `messages`; CLI exit classes remain frozen for the 0.2 stabilization line.

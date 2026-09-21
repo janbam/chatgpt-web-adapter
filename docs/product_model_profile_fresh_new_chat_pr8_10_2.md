@@ -1,6 +1,8 @@
 # PR8.10.2 — Fresh New-Chat Initial-Mode Acquisition, Bounded Readiness Wait and Strict Profile-Selection Repair
 
-Status: IMPLEMENTED — fresh-new-chat live repair gate pending.
+Status: SUPERSEDED — documents the retired direct mode-button selector.
+
+The current production selector is documented in `product_model_profile_pr8_10.md`. It uses the composer-local `Thinking effort` trigger and four-position Power slider. The three-position selector below remains only as historical failure context.
 
 ## Trigger
 

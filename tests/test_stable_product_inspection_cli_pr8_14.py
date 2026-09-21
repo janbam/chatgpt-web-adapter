@@ -99,20 +99,18 @@ class _Runtime:
         raise AssertionError("PR8.14 inspection commands must not write")
 
 
-def test_product_native_and_semantic_profile_names_normalize_to_proven_keys() -> None:
+def test_product_profile_names_normalize_to_runtime_keys() -> None:
     assert cli.normalize_public_model_profile("INSTANT") == "FAST"
-    assert cli.normalize_public_model_profile("fast") == "FAST"
     assert cli.normalize_public_model_profile("MEDIUM") == "BALANCED"
-    assert cli.normalize_public_model_profile("balanced") == "BALANCED"
     assert cli.normalize_public_model_profile("HIGH") == "DEEP"
-    assert cli.normalize_public_model_profile("deep") == "DEEP"
-    assert cli.product_native_model_profile("DEEP") == "HIGH"
+    assert cli.normalize_public_model_profile("medium") == "BALANCED"
 
-    with pytest.raises(ValueError, match="unsupported profile"):
-        cli.normalize_public_model_profile("MAX")
+    for unsupported in ("FAST", "BALANCED", "DEEP", "MAX"):
+        with pytest.raises(ValueError, match="unsupported profile"):
+            cli.normalize_public_model_profile(unsupported)
 
 
-def test_send_accepts_product_native_alias_and_delegates_canonical_profile(monkeypatch) -> None:
+def test_send_accepts_product_profiles_and_delegates_runtime_keys(monkeypatch) -> None:
     captured = {}
 
     def fake_run_send(args):
@@ -130,22 +128,35 @@ def test_send_accepts_product_native_alias_and_delegates_canonical_profile(monke
     assert cli.main(["send", "hello", "--profile", "instant"]) == 0
     assert captured["profile"] == "FAST"
 
+    assert cli.main(["send", "hello"]) == 0
+    assert captured["profile"] == "DEEP"
 
-def test_profile_contract_exposes_product_names_first_and_keeps_semantic_aliases() -> None:
+
+def test_send_rejects_removed_profile_aliases() -> None:
+    parser = cli._build_parser()
+
+    for alias in ("FAST", "BALANCED", "DEEP"):
+        with pytest.raises(SystemExit):
+            parser.parse_args(["send", "hello", "--profile", alias])
+
+
+def test_send_exposes_skip_profile_as_an_explicit_alternative() -> None:
+    parser = cli._build_parser()
+
+    args = parser.parse_args(["send", "hello", "--skip-profile"])
+
+    assert args.skip_profile is True
+    assert args.profile == "DEEP"
+
+
+def test_profile_contract_exposes_only_product_names() -> None:
     contract = cli.model_profile_contract()
 
     assert contract["default"] == "HIGH"
-    assert contract["product_native"] == ["INSTANT", "MEDIUM", "HIGH"]
-    assert contract["semantic_aliases"] == {
-        "FAST": "INSTANT",
-        "BALANCED": "MEDIUM",
-        "DEEP": "HIGH",
-    }
-    assert contract["normalization"] == {
-        "INSTANT": "FAST",
-        "MEDIUM": "BALANCED",
-        "HIGH": "DEEP",
-    }
+    assert contract["accepted"] == ["INSTANT", "MEDIUM", "HIGH"]
+    assert contract["slider_indices"] == {"INSTANT": 0, "MEDIUM": 1, "HIGH": 2}
+    assert "semantic_aliases" not in contract
+    assert "normalization" not in contract
     assert contract["max_mapped"] is False
 
 
@@ -164,7 +175,7 @@ def test_status_is_read_only_and_unhealthy_state_uses_exit_one(monkeypatch, caps
     assert runtime.write_called is False
 
 
-def test_capabilities_is_read_only_and_exports_profile_alias_contract(monkeypatch, capsys) -> None:
+def test_capabilities_is_read_only_and_exports_product_profile_contract(monkeypatch, capsys) -> None:
     runtime = _Runtime()
     monkeypatch.setattr(cli, "assemble_product_runtime", lambda **kwargs: runtime)
 

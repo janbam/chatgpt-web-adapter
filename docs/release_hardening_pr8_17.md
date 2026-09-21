@@ -275,12 +275,12 @@ cwa snapshot
 cwa export
 ```
 
-The README also explicitly preserves:
+The README exposes only the current product profile names:
 
 ```text
-INSTANT <-> FAST
-MEDIUM  <-> BALANCED
-HIGH    <-> DEEP
+INSTANT
+MEDIUM
+HIGH
 ```
 
 and states that image/file upload, multimodal continuation, tools/connectors, and future browserless write transports are later capability work rather than implied 0.2 support.

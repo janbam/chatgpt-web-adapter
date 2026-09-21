@@ -116,6 +116,24 @@ def test_standalone_send_profile_is_case_insensitive(monkeypatch, capsys) -> Non
     assert runtime.send_call[1]["poll_interval"] == 0.25
 
 
+def test_standalone_send_can_preserve_the_active_product_profile(monkeypatch, capsys) -> None:
+    runtime = _Runtime()
+    monkeypatch.setattr(cli, "assemble_product_runtime", lambda **kwargs: runtime)
+
+    code = cli.main(["send", "hello", "--skip-profile"])
+
+    assert code == 0
+    assert capsys.readouterr().out == "assistant reply\n"
+    assert runtime.send_call[1]["model_profile"] is None
+
+
+def test_standalone_send_rejects_profile_with_skip_profile() -> None:
+    with pytest.raises(SystemExit):
+        cli._build_parser().parse_args(
+            ["send", "hello", "--profile", "DEEP", "--skip-profile"]
+        )
+
+
 def test_standalone_send_json_keeps_structured_execution(monkeypatch, capsys) -> None:
     runtime = _Runtime()
     monkeypatch.setattr(cli, "assemble_product_runtime", lambda **kwargs: runtime)

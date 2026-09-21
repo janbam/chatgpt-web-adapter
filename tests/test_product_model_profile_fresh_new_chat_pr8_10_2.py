@@ -17,30 +17,31 @@ def _ensure_target_mode_block(source: str) -> str:
     return source[start:end]
 
 
-def test_fresh_new_chat_initial_mode_uses_bounded_existing_pr88_acquisition() -> None:
+def test_fresh_new_chat_initial_mode_uses_bounded_power_surface_acquisition() -> None:
     source = _source()
     block = _ensure_target_mode_block(source)
 
     assert "const PR810_INITIAL_MODE_ACQUISITION_TIMEOUT_MS = 8000;" in source
-    assert "await _pr88InstantWaitForSelectedMode(" in block
+    assert "await _pr810AcquireInitialMode(" in block
     assert "PR810_INITIAL_MODE_ACQUISITION_TIMEOUT_MS" in block
 
-    # The PR8.10 initial-state decision must no longer be a one-shot snapshot.
+    # Initial proof must come from the current Power surface, never a legacy mode button.
     acquisition_prefix = block[: block.index("if (before.selectedMode === targetMode)")]
-    assert "await _pr88InstantSelectedModeSnapshot(debuggee)" not in acquisition_prefix
+    assert "_pr88InstantWaitForSelectedMode" not in acquisition_prefix
+    assert "_pr88InstantSelectedModeSnapshot" not in acquisition_prefix
 
 
 def test_initial_mode_acquisition_remains_strict_and_prewrite() -> None:
     source = _source()
     block = _ensure_target_mode_block(source)
 
-    wait_index = block.index("await _pr88InstantWaitForSelectedMode(")
+    wait_index = block.index("await _pr810AcquireInitialMode(")
     not_proven_index = block.index("throw new Error(_pr810InitialModeFailure(before));")
     unsupported_index = block.index("PR8_10_MODEL_PROFILE_INITIAL_MODE_UNSUPPORTED")
     write_boundary_index = block.index("_pr810InstallWriteBoundary(debuggee, context);")
 
-    assert wait_index < not_proven_index < write_boundary_index
-    assert wait_index < unsupported_index < write_boundary_index
+    assert write_boundary_index < wait_index < not_proven_index
+    assert write_boundary_index < wait_index < unsupported_index
     assert "if (_pr810Mode(before.selectedMode) === null)" in block
 
 
@@ -53,7 +54,6 @@ def test_initial_mode_failure_preserves_bounded_diagnostics() -> None:
     assert "context.initialModeComposerReady = before?.composerReady === true;" in source
     assert "context.selectedModeBeforeProofKind = before?.proofKind || \"unknown\";" in source
     assert "context.selectedModeBeforeCandidateCount" in source
-    assert "context.selectedModeBeforeNearestDistancePx" in source
 
 
 def test_success_record_exposes_initial_mode_acquisition_evidence() -> None:
@@ -64,7 +64,7 @@ def test_success_record_exposes_initial_mode_acquisition_evidence() -> None:
     assert "initialModeComposerReady:" in source
     assert "selectedModeBeforeProofKind:" in source
     assert "selectedModeBeforeCandidateCount:" in source
-    assert "selectedModeBeforeNearestDistancePx:" in source
+    assert "powerSliderValueBefore:" in source
     assert "boundedInitialModeAcquisition: true" in source
 
 
@@ -73,5 +73,6 @@ def test_pr8102_does_not_widen_the_proven_three_state_target_mapping() -> None:
 
     assert "Object.freeze({INSTANT: 0, MEDIUM: 1, HIGH: 2})" in source
     assert 'supportedProductModes: ["INSTANT", "MEDIUM", "HIGH"]' in source
+    assert "unsupportedPowerIndices: [3]" in source
     assert "EXTRA_HIGH: 3" not in source
     assert "PRO_STANDARD:" not in source

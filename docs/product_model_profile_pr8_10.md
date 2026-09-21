@@ -1,21 +1,21 @@
-# PR8.10.1 — Semantic Model Profiles over Proven Reasoning-Effort Slider
+# PR8.10 — Product Profiles over the Composer Power Slider
 
-Status: CLOSED — live-proven and graduated to the production product runtime surface.
+Status: CURRENT IMPLEMENTATION UPDATED — live gate pending after the Power-slider migration.
 
 ## Goal
 
-Generalize the already-proven PR8.8 production effort selector without reopening picker research.
+Select one explicit product effort for every browser-owned turn before prompt insertion.
 
-HDE-facing semantic intent:
+Current product contract:
 
 ```text
-FAST     -> INSTANT -> slider 0
-BALANCED -> MEDIUM  -> slider 1
-DEEP     -> HIGH    -> slider 2
-MAX      -> UNMAPPED
+INSTANT -> Power 0
+MEDIUM  -> Power 1
+HIGH    -> Power 2
+PRO     -> Power 3 -> unsupported
 ```
 
-`MAX` is deliberately not synthesized from the existing three-state slider.
+The public CLI accepts only `INSTANT`, `MEDIUM`, and `HIGH`. Position 3 is never targeted.
 
 ## Selection contract
 
@@ -24,23 +24,30 @@ An explicit profile requirement is strict:
 ```text
 profile requested
   -> exact product target resolved
-  -> current product mode proven
-  -> if needed, proven 0..2 effort slider focused
-  -> Home establishes index 0
+  -> exact composer-local menu trigger resolved as `Thinking effort` or its selected mode
+  -> trigger center hit-tested, then opened with one trusted CDP pointer click
+  -> an already-open stale model view is closed and reopened with two bounded clicks
+  -> active `[role=menuitem][aria-label=Power]` keyboard target resolved
+  -> nested aria-hidden `[data-model-reasoning-effort-slider]` evidence slider resolved
+  -> current mode derived from proven ARIA range 0..3 and current value
+  -> if needed, Power menuitem focused
+  -> three ArrowLeft events establish index 0 across the proven 0..3 range
   -> bounded ArrowRight count reaches target index
-  -> selected product mode proven before prompt insertion/write
+  -> target ARIA value and derived mode proven before prompt insertion/write
 or
   -> fail before conversation write
 ```
 
-The existing PR8.8 Instant path remains in the call chain. PR8.10 uses the same proven browser-local primitives rather than introducing a new picker topology.
+PR8.10 is the sole production selector. It removes the profile requirement before delegating to older worker overlays, so obsolete direct mode-button and three-position-slider selectors cannot run.
 
-A mode already selected requires no mutation and no transient foreground activation.
+A mode already selected requires no slider mutation. The background runtime tab is still foregrounded briefly because the product reveals the current value only inside the menu.
 
 ## Safety
 
 - one ordinary browser-owned product write per test turn;
 - no automatic retry;
+- no direct mode-button compatibility path;
+- no three-position-slider compatibility path;
 - no model-option coordinate guessing;
 - no Advanced navigation;
 - no raw request/response export;
@@ -50,7 +57,9 @@ A mode already selected requires no mutation and no transient foreground activat
 - unsupported explicit product modes fail before write;
 - no silent profile fallback.
 
-## Production live evidence
+## Historical production live evidence
+
+The evidence below validated the retired three-position UI. It does not validate the current Power surface.
 
 The bounded sequence completed successfully:
 

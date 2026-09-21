@@ -34,6 +34,7 @@ cwa doctor --json
 cwa status --json
 cwa capabilities --json
 cwa send "Give me a short project summary." --profile HIGH
+cwa send "Use the current page model and thinking level." --skip-profile
 cwa messages <conversation-id> --json
 cwa snapshot <conversation-id> --name project --output-dir ./artifacts --json
 cwa export <conversation-id> --format jsonl --name project --output-dir ./artifacts --json
@@ -42,12 +43,10 @@ cwa export <conversation-id> --format jsonl --name project --output-dir ./artifa
 The accepted public CLI model-profile names are:
 
 ```text
-INSTANT <-> FAST
-MEDIUM  <-> BALANCED
-HIGH    <-> DEEP
+INSTANT
+MEDIUM
+HIGH
 ```
-
-Product-native names are preferred in CLI documentation. Direct Python runtime profile keys remain the semantic `FAST` / `BALANCED` / `DEEP` contract.
 
 Temporary Chat is available through the same public CLI surface:
 
