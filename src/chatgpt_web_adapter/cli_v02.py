@@ -25,44 +25,30 @@ EXIT_USAGE = 2
 EXIT_OPERATION_FAILED = 3
 EXIT_RECONCILIATION_REQUIRED = 4
 
-PRODUCT_NATIVE_MODEL_PROFILES: tuple[str, ...] = ("INSTANT", "MEDIUM", "HIGH")
-SEMANTIC_MODEL_PROFILES: tuple[str, ...] = ("FAST", "BALANCED", "DEEP")
-PUBLIC_MODEL_PROFILES: tuple[str, ...] = (
-    *PRODUCT_NATIVE_MODEL_PROFILES,
-    *SEMANTIC_MODEL_PROFILES,
-)
-PRODUCT_NATIVE_TO_SEMANTIC: dict[str, str] = {
+PUBLIC_MODEL_PROFILES: tuple[str, ...] = ("INSTANT", "MEDIUM", "HIGH")
+PUBLIC_TO_RUNTIME_MODEL_PROFILE: dict[str, str] = {
     "INSTANT": "FAST",
     "MEDIUM": "BALANCED",
     "HIGH": "DEEP",
-}
-SEMANTIC_TO_PRODUCT_NATIVE: dict[str, str] = {
-    semantic: product
-    for product, semantic in PRODUCT_NATIVE_TO_SEMANTIC.items()
 }
 DEFAULT_PUBLIC_MODEL_PROFILE = "HIGH"
 
 
 def normalize_public_model_profile(value: str) -> str:
-    """Normalize product-native or semantic profile names to CWA's proven semantic key."""
+    """Validate a public product profile and translate it to the runtime key."""
 
     if not isinstance(value, str):
         raise TypeError("profile must be a string")
     normalized = value.strip().upper()
-    if normalized in PRODUCT_NATIVE_TO_SEMANTIC:
-        return PRODUCT_NATIVE_TO_SEMANTIC[normalized]
-    if normalized in SEMANTIC_MODEL_PROFILES:
-        return normalized
+    if normalized in PUBLIC_TO_RUNTIME_MODEL_PROFILE:
+        return PUBLIC_TO_RUNTIME_MODEL_PROFILE[normalized]
     supported = ", ".join(PUBLIC_MODEL_PROFILES)
     raise ValueError(f"unsupported profile {value!r}; expected one of: {supported}")
 
 
-def product_native_model_profile(value: str) -> str:
-    semantic = normalize_public_model_profile(value)
-    return SEMANTIC_TO_PRODUCT_NATIVE[semantic]
-
-
 def _argparse_model_profile(value: str) -> str:
+    """Expose profile validation failures through argparse's usage channel."""
+
     try:
         return normalize_public_model_profile(value)
     except (TypeError, ValueError) as error:
@@ -70,12 +56,12 @@ def _argparse_model_profile(value: str) -> str:
 
 
 def model_profile_contract() -> dict[str, Any]:
+    """Describe the complete public CLI profile contract."""
+
     return {
         "default": DEFAULT_PUBLIC_MODEL_PROFILE,
-        "product_native": list(PRODUCT_NATIVE_MODEL_PROFILES),
-        "semantic_aliases": dict(SEMANTIC_TO_PRODUCT_NATIVE),
         "accepted": list(PUBLIC_MODEL_PROFILES),
-        "normalization": dict(PRODUCT_NATIVE_TO_SEMANTIC),
+        "slider_indices": {"INSTANT": 0, "MEDIUM": 1, "HIGH": 2},
         "max_mapped": False,
     }
 
@@ -97,11 +83,9 @@ def _configure_send_profile(parser: argparse.ArgumentParser) -> None:
             continue
         action.type = _argparse_model_profile
         action.choices = None
-        action.metavar = "{INSTANT,MEDIUM,HIGH,FAST,BALANCED,DEEP}"
-        action.help = (
-            "product model profile; default HIGH. Semantic aliases remain supported: "
-            "FAST=INSTANT, BALANCED=MEDIUM, DEEP=HIGH"
-        )
+        action.default = DEFAULT_PUBLIC_MODEL_PROFILE
+        action.metavar = "{INSTANT,MEDIUM,HIGH}"
+        action.help = "product model profile; default HIGH"
         return
     raise RuntimeError("PR8_14_SEND_PROFILE_ARGUMENT_MISSING")
 
@@ -312,7 +296,6 @@ def _run_capabilities(args: argparse.Namespace) -> int:
             owner = entry.get("owner", "UNKNOWN") if isinstance(entry, dict) else "UNKNOWN"
             print(f"{name}: {state} ({owner})")
         print("model_profiles: INSTANT MEDIUM HIGH")
-        print("aliases: FAST=INSTANT BALANCED=MEDIUM DEEP=HIGH")
     return EXIT_OK
 
 

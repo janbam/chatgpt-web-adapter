@@ -188,7 +188,7 @@ def run_live_gate(*, conversation: str, timeout: float = 150.0) -> dict[str, Any
 
     report: dict[str, Any] = {
         "ok": False,
-        "pr": "PR8.10.1",
+        "pr": "PR8.10",
         "schema": SCHEMA,
         "conversation": conversation,
         "product_write_budget": len(LIVE_SEQUENCE),
@@ -237,13 +237,13 @@ def run_live_gate(*, conversation: str, timeout: float = 150.0) -> dict[str, Any
     report["summary"] = {
         "profiles_proven": list(LIVE_SEQUENCE),
         "strict_prewrite_selection_supported": True,
-        "all_three_slider_states_proven": True,
+        "all_supported_power_positions_proven": True,
         "max_profile_mapped": False,
         "cross_conversation_scope_proven": False,
     }
     report["architecture_invalidation_check"] = {
         "current_product_runtime_boundary_invalidated": False,
-        "existing_pr8_8_selector_reused": True,
+        "current_power_selector_used": True,
         "silent_profile_fallback": False,
         "model_preservation_scope": "NOT_YET_PROVEN",
     }
